@@ -1,0 +1,49 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+*.whl
+pip-log.txt
+pip-delete-this-directory.txt
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# ---------- Environment ----------
+.env
+.env.*
+!.env.example
+
+# ---------- IDE ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---------- Node / Frontend ----------
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+
+# ---------- Built frontend (generated) ----------
+static/
+
+# ---------- Data directory (runtime / models / DB) ----------
+/data/
+
+# ---------- LLM model weights ----------
+*.gguf
+
+# ---------- OS ----------
+.DS_Store
+Thumbs.db

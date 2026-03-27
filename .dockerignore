@@ -1,0 +1,10 @@
+.git
+node_modules
+frontend/.next
+frontend/node_modules
+__pycache__
+*.pyc
+data/
+*.gguf
+.env
+plans/
