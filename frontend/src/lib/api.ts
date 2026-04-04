@@ -28,12 +28,19 @@ export interface SearchResult {
   match_type: string;
 }
 
+export interface ToolCallLog {
+  tool: string;
+  args: Record<string, unknown>;
+  result_preview: string;
+}
+
 export interface ChatMessage {
   id: string;
   session_id?: string;
   message: string;
   role: string;
   context_doc_ids?: string[];
+  tool_calls?: ToolCallLog[];
   created_at: string;
 }
 
@@ -227,6 +234,21 @@ export async function sendChatMessage(
   return fetchAPI('/chat', {
     method: 'POST',
     body: JSON.stringify({ message, session_id: sessionId || null }),
+  });
+}
+
+export async function sendAgentMessage(
+  message: string,
+  sessionId?: string,
+  contextProcedure?: string,
+): Promise<{ reply: string; session_id: string; tool_calls_log: ToolCallLog[] }> {
+  return fetchAPI('/agent/chat', {
+    method: 'POST',
+    body: JSON.stringify({
+      message,
+      session_id: sessionId || null,
+      context_procedure: contextProcedure || '',
+    }),
   });
 }
 

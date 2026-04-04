@@ -157,6 +157,12 @@ def init_db() -> None:
         except Exception:
             pass  # Column already exists
 
+        # Migration: add tool_calls column for agent mode
+        try:
+            cur.execute("ALTER TABLE chat_history ADD COLUMN tool_calls TEXT;")
+        except Exception:
+            pass  # Column already exists
+
         # -- procedures table ------------------------------------------------
         cur.execute("""
             CREATE TABLE IF NOT EXISTS procedures (
@@ -729,6 +735,7 @@ def insert_chat_message(
     role: str,
     session_id: str,
     context_doc_ids: list[str] | None = None,
+    tool_calls: list[dict] | None = None,
 ) -> None:
     """Insert a new chat history entry.
 
@@ -738,28 +745,35 @@ def insert_chat_message(
         role: Either 'user' or 'assistant'.
         session_id: UUID of the parent chat session.
         context_doc_ids: Optional list of document UUIDs used as context.
+        tool_calls: Optional list of tool call log entries (agent mode).
     """
     now = _now_iso()
     ctx_json = json.dumps(context_doc_ids, ensure_ascii=False) if context_doc_ids else None
+    tool_calls_json = json.dumps(tool_calls, ensure_ascii=False) if tool_calls else None
     with _get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO chat_history (id, session_id, message, role, context_doc_ids, created_at)
-            VALUES (?, ?, ?, ?, ?, ?);
+            INSERT INTO chat_history (id, session_id, message, role, context_doc_ids, tool_calls, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
             """,
-            (msg_id, session_id, message, role, ctx_json, now),
+            (msg_id, session_id, message, role, ctx_json, tool_calls_json, now),
         )
         conn.commit()
 
 
 def _parse_chat_row(row: sqlite3.Row) -> dict[str, Any]:
-    """Convert a chat_history row to a dict, deserialising context_doc_ids."""
+    """Convert a chat_history row to a dict, deserialising JSON columns."""
     d = dict(row)
     if d.get("context_doc_ids") is not None:
         try:
             d["context_doc_ids"] = json.loads(d["context_doc_ids"])
         except (json.JSONDecodeError, TypeError):
             d["context_doc_ids"] = []
+    if d.get("tool_calls") is not None:
+        try:
+            d["tool_calls"] = json.loads(d["tool_calls"])
+        except (json.JSONDecodeError, TypeError):
+            d["tool_calls"] = []
     return d
 
 

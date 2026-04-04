@@ -336,3 +336,41 @@ class GapAlertsResponse(BaseModel):
 
     gaps: list[GapAlert]
     total: int
+
+
+# ---------------------------------------------------------------------------
+# Agent chat
+# ---------------------------------------------------------------------------
+
+
+class AgentChatRequest(BaseModel):
+    """Incoming message for the agentic chat endpoint."""
+
+    message: str
+    session_id: Optional[str] = Field(
+        None,
+        description="Chat session UUID. A new session is created if absent.",
+    )
+    context_procedure: str = Field(
+        "",
+        description="Optional procedure text to inject into the agent's system prompt.",
+    )
+
+
+class ToolCallLog(BaseModel):
+    """A single tool invocation recorded during an agentic turn."""
+
+    tool: str = Field(..., description="Tool name (e.g. 'recherche_web')")
+    args: dict = Field(..., description="Arguments passed to the tool")
+    result_preview: str = Field(..., description="First 300 chars of the tool result")
+
+
+class AgentChatResponse(BaseModel):
+    """Agent reply with tool usage log and session info."""
+
+    reply: str
+    session_id: str
+    tool_calls_log: list[ToolCallLog] = Field(
+        default_factory=list,
+        description="Ordered list of tools the agent called before answering",
+    )

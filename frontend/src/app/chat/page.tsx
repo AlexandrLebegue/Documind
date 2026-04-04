@@ -3,13 +3,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   sendChatMessage,
+  sendAgentMessage,
   getChatHistory,
   getChatSessions,
   createChatSession,
   updateChatSession,
   deleteChatSession,
 } from '@/lib/api';
-import type { ChatMessage as ChatMessageType, ChatSession } from '@/lib/api';
+import type { ChatMessage as ChatMessageType, ChatSession, ToolCallLog } from '@/lib/api';
 import ChatMessage from '@/components/ChatMessage';
 
 export default function ChatPage() {
@@ -25,6 +26,9 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Agent mode
+  const [agentMode, setAgentMode] = useState(false);
 
   // Rename state
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -174,15 +178,34 @@ export default function ChatPage() {
     }
 
     try {
-      const res = await sendChatMessage(trimmed, activeSessionId || undefined);
+      let replyText: string;
+      let sessionId: string;
+      let sourceDocIds: string[] = [];
+      let toolCallsLog: ToolCallLog[] = [];
+
+      if (agentMode) {
+        const res = await sendAgentMessage(trimmed, activeSessionId || undefined);
+        replyText = res.reply;
+        sessionId = res.session_id;
+        toolCallsLog = res.tool_calls_log || [];
+      } else {
+        const res = await sendChatMessage(trimmed, activeSessionId || undefined);
+        replyText = res.reply;
+        sessionId = res.session_id;
+        sourceDocIds = res.source_document_ids || [];
+      }
 
       const assistantMessage: ChatMessageType = {
         id: `temp-${Date.now()}-reply`,
-        message: res.reply,
+        message: replyText,
         role: 'assistant',
-        context_doc_ids: res.source_document_ids,
+        context_doc_ids: sourceDocIds.length > 0 ? sourceDocIds : undefined,
+        tool_calls: toolCallsLog.length > 0 ? toolCallsLog : undefined,
         created_at: new Date().toISOString(),
       };
+
+      // Alias for the block below that references res.session_id
+      const res = { session_id: sessionId };
       setMessages((prev) => [...prev, assistantMessage]);
 
       // If this was a new conversation (no activeSessionId), update state
@@ -504,11 +527,18 @@ export default function ChatPage() {
                 réponses précises et sourcées.
               </p>
               <div className="mt-6 flex flex-wrap gap-2 max-w-md justify-center">
-                {[
-                  'Quels sont mes documents récents ?',
-                  'Quel est le montant total de mes factures ?',
-                  'Résume mon dernier contrat',
-                ].map((suggestion) => (
+                {(agentMode
+                  ? [
+                      'Crée une procédure pour renouveler un passeport',
+                      'Recherche les démarches pour ouvrir un compte bancaire',
+                      'Vérifie si les liens de ma procédure sont valides',
+                    ]
+                  : [
+                      'Quels sont mes documents récents ?',
+                      'Quel est le montant total de mes factures ?',
+                      'Résume mon dernier contrat',
+                    ]
+                ).map((suggestion) => (
                   <button
                     key={suggestion}
                     onClick={() => {
@@ -567,6 +597,40 @@ export default function ChatPage() {
 
         {/* Input area */}
         <div className="flex-shrink-0 px-4 md:px-6 py-4 border-t border-beige-300 bg-white/50 backdrop-blur-sm">
+          {/* Agent mode toggle */}
+          <div className="flex items-center justify-end max-w-4xl mx-auto mb-2">
+            <button
+              onClick={() => setAgentMode((v) => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                agentMode
+                  ? 'bg-accent/10 text-accent border-accent/30'
+                  : 'bg-transparent text-[#6b7280] border-beige-300 hover:border-accent/30 hover:text-accent/70'
+              }`}
+              title={agentMode ? 'Mode agent actif — accès au web' : 'Activer le mode agent (accès web)'}
+            >
+              {/* Globe icon */}
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 14 14"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="7" cy="7" r="5.5" />
+                <path d="M7 1.5C7 1.5 5 4 5 7s2 5.5 2 5.5" />
+                <path d="M7 1.5C7 1.5 9 4 9 7s-2 5.5-2 5.5" />
+                <path d="M1.5 7h11" />
+              </svg>
+              Mode agent
+              {agentMode && (
+                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+              )}
+            </button>
+          </div>
+
           <div className="flex items-end gap-3 max-w-4xl mx-auto">
             <div className="flex-1 relative">
               <textarea
@@ -574,7 +638,11 @@ export default function ChatPage() {
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder="Posez une question sur vos documents..."
+                placeholder={
+                  agentMode
+                    ? 'Posez une question — l\'agent peut chercher sur internet…'
+                    : 'Posez une question sur vos documents…'
+                }
                 disabled={sending}
                 rows={1}
                 className="w-full px-4 py-3 bg-white border border-beige-300 rounded-xl text-sm text-[#1a1a1a] placeholder-[#6b7280] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent resize-none disabled:opacity-50 disabled:cursor-not-allowed"
@@ -605,7 +673,7 @@ export default function ChatPage() {
             </button>
           </div>
           <p className="text-[10px] text-[#6b7280] text-center mt-2">
-            Appuyez sur Entrée pour envoyer, Shift+Entrée pour un saut de ligne
+            Entrée pour envoyer · Shift+Entrée pour un saut de ligne
           </p>
         </div>
       </div>

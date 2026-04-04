@@ -56,11 +56,13 @@ from models import (
     AlertItem, AlertsResponse,
     RenewalSuggestion, RenewalSuggestionsResponse,
     GapAlert, GapAlertsResponse,
+    AgentChatRequest, AgentChatResponse, ToolCallLog,
 )
 from pipeline import process_document, reprocess_document
 from search import hybrid_search, load_embeddings_cache, refresh_embeddings_cache
 from llm import init_llm_client, chat_with_context, chat_with_context_multiturn, analyze_procedure, match_document_for_procedure
 from embeddings import load_embedding_model
+from agent import run_agent
 
 logger = logging.getLogger(__name__)
 
@@ -724,6 +726,76 @@ async def chat(body: ChatRequest) -> ChatResponse:
         reply=reply,
         source_document_ids=source_doc_ids,
         session_id=session_id,
+    )
+
+
+@app.post(
+    "/api/agent/chat",
+    response_model=AgentChatResponse,
+    summary="Agentic chat with web access",
+    description="Ask the agent a question. The agent can search the web, scrape pages, "
+    "verify links, and crawl sites to answer — in addition to the local document base. "
+    "Supports multi-turn conversations via session_id.",
+)
+async def agent_chat(body: AgentChatRequest) -> AgentChatResponse:
+    """Agentic chat endpoint with web tools and multi-turn support."""
+    if app.state.llm is None:
+        raise HTTPException(
+            status_code=503,
+            detail="LLM not loaded. Agent chat unavailable.",
+        )
+
+    # Resolve or create session
+    session_id = body.session_id
+    if session_id:
+        session = get_chat_session(session_id)
+        if session is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chat session '{session_id}' not found",
+            )
+    else:
+        session_id = str(uuid.uuid4())
+        title = body.message[:50].strip()
+        if len(body.message) > 50:
+            title += "…"
+        create_chat_session(session_id, title)
+        logger.info("Agent: auto-created session %s: '%s'", session_id, title)
+
+    # Store user message
+    insert_chat_message(str(uuid.uuid4()), body.message, "user", session_id)
+
+    # Retrieve conversation history for multi-turn
+    conversation_history = get_session_messages_for_llm(session_id, limit=20)
+
+    # Run the agentic loop
+    try:
+        reply, tool_calls_log = await run_agent(
+            llm_client=app.state.llm,
+            user_message=body.message,
+            context_procedure=body.context_procedure,
+            conversation_history=conversation_history,
+        )
+    except Exception as exc:
+        logger.error("Agent run failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Agent error: {exc}") from exc
+
+    # Store assistant reply with tool calls
+    tool_calls_dicts = [tc for tc in tool_calls_log]
+    insert_chat_message(
+        str(uuid.uuid4()), reply, "assistant", session_id,
+        tool_calls=tool_calls_dicts if tool_calls_dicts else None,
+    )
+    update_chat_session_timestamp(session_id)
+
+    logger.info(
+        "Agent reply (%d chars, %d tool calls) in session %s",
+        len(reply), len(tool_calls_log), session_id,
+    )
+    return AgentChatResponse(
+        reply=reply,
+        session_id=session_id,
+        tool_calls_log=[ToolCallLog(**tc) for tc in tool_calls_log],
     )
 
 
