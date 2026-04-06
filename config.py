@@ -42,7 +42,14 @@ def save_settings(settings: dict) -> None:
 
 _saved = load_settings()
 
-# OpenRouter LLM settings — saved settings take precedence over env vars
+# AI provider — "openrouter" | "ollama" | "custom"
+# Saved settings take precedence over env vars
+AI_PROVIDER = _saved.get(
+    "ai_provider",
+    os.environ.get("AI_PROVIDER", "openrouter"),
+)
+
+# OpenRouter / custom LLM settings — saved settings take precedence over env vars
 OPENROUTER_API_KEY = _saved.get(
     "openrouter_api_key",
     os.environ.get("OPENROUTER_API_KEY", ""),
@@ -54,6 +61,16 @@ OPENROUTER_BASE_URL = _saved.get(
 OPENROUTER_MODEL = _saved.get(
     "openrouter_model",
     os.environ.get("OPENROUTER_MODEL", "google/gemini-3.1-pro-preview"),
+)
+
+# Ollama settings (used when AI_PROVIDER == "ollama")
+OLLAMA_BASE_URL = _saved.get(
+    "ollama_base_url",
+    os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
+)
+OLLAMA_MODEL = _saved.get(
+    "ollama_model",
+    os.environ.get("OLLAMA_MODEL", "llama3.2"),
 )
 LLM_TEMPERATURE = 0.1
 LLM_MAX_TOKENS = 2048

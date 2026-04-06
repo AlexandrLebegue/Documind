@@ -260,17 +260,23 @@ class ProcedureExecutionResponse(BaseModel):
 class SettingsResponse(BaseModel):
     """Current application settings (API key is masked)."""
 
+    ai_provider: str = Field(..., description="Active AI provider: openrouter | ollama | custom")
     openrouter_api_key: str = Field(
         ..., description="Masked API key (only last 4 characters visible)"
     )
     openrouter_model: str
     openrouter_base_url: str
+    ollama_base_url: str
+    ollama_model: str
     data_dir: str
 
 
 class SettingsUpdateRequest(BaseModel):
     """Partial update payload for application settings."""
 
+    ai_provider: Optional[str] = Field(
+        None, description="AI provider: openrouter | ollama | custom"
+    )
     openrouter_api_key: Optional[str] = Field(
         None, description="OpenRouter API key (full key)"
     )
@@ -279,6 +285,12 @@ class SettingsUpdateRequest(BaseModel):
     )
     openrouter_base_url: Optional[str] = Field(
         None, description="OpenRouter base URL"
+    )
+    ollama_base_url: Optional[str] = Field(
+        None, description="Ollama base URL (e.g. http://192.168.1.50:11434)"
+    )
+    ollama_model: Optional[str] = Field(
+        None, description="Ollama model name (e.g. llama3.2, mistral)"
     )
 
 

@@ -68,16 +68,22 @@ export interface Health {
 }
 
 export interface Settings {
+  ai_provider: string;
   openrouter_api_key: string;
   openrouter_model: string;
   openrouter_base_url: string;
+  ollama_base_url: string;
+  ollama_model: string;
   data_dir: string;
 }
 
 export interface SettingsUpdate {
+  ai_provider?: string;
   openrouter_api_key?: string;
   openrouter_model?: string;
   openrouter_base_url?: string;
+  ollama_base_url?: string;
+  ollama_model?: string;
 }
 
 // Procedure types

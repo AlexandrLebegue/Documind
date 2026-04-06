@@ -1,4 +1,4 @@
-"""LLM module: OpenRouter API wrapper for metadata extraction and chat."""
+"""LLM module: OpenRouter / Ollama / custom API wrapper for metadata extraction and chat."""
 
 import json
 import logging
@@ -32,19 +32,49 @@ _MAX_RAG_DOC_CHARS = 2000
 _API_TIMEOUT = 120.0
 
 
+def _active_model() -> str:
+    """Return the model identifier for the currently active provider."""
+    if _cfg.AI_PROVIDER == "ollama":
+        return _cfg.OLLAMA_MODEL
+    return _cfg.OPENROUTER_MODEL
+
+
 def init_llm_client() -> httpx.Client:
-    """Create an httpx client pre-configured for the OpenRouter API.
+    """Create an httpx client pre-configured for the active AI provider.
+
+    Supported providers (``config.AI_PROVIDER``):
+    - ``"openrouter"`` — OpenRouter cloud API (requires API key)
+    - ``"ollama"``     — Local/remote Ollama instance (no key needed)
+    - ``"custom"``     — OpenAI-compatible endpoint with custom base URL
 
     Returns:
-        An :class:`httpx.Client` with ``Authorization`` and base URL set.
+        An :class:`httpx.Client` ready for ``/chat/completions`` calls.
 
     Raises:
-        ValueError: If :data:`OPENROUTER_API_KEY` is empty or unset.
+        ValueError: If OpenRouter/custom is selected but the API key is missing.
     """
+    provider = _cfg.AI_PROVIDER
+
+    if provider == "ollama":
+        # Ollama exposes an OpenAI-compatible endpoint — no auth required
+        base_url = _cfg.OLLAMA_BASE_URL.rstrip("/") + "/v1"
+        client = httpx.Client(
+            base_url=base_url,
+            headers={"Content-Type": "application/json"},
+            timeout=_API_TIMEOUT,
+        )
+        logger.info(
+            "Ollama LLM client initialised (model=%s, base_url=%s)",
+            _cfg.OLLAMA_MODEL,
+            base_url,
+        )
+        return client
+
+    # openrouter or custom — both require an API key
     if not _cfg.OPENROUTER_API_KEY:
         raise ValueError(
             "OPENROUTER_API_KEY is not set. "
-            "Please set the environment variable or update config.py."
+            "Please configure it in Settings or set the environment variable."
         )
 
     client = httpx.Client(
@@ -58,7 +88,8 @@ def init_llm_client() -> httpx.Client:
         timeout=_API_TIMEOUT,
     )
     logger.info(
-        "OpenRouter LLM client initialised (model=%s, base_url=%s)",
+        "LLM client initialised (provider=%s, model=%s, base_url=%s)",
+        provider,
         _cfg.OPENROUTER_MODEL,
         _cfg.OPENROUTER_BASE_URL,
     )
@@ -115,7 +146,7 @@ def _call_llm(
         user_content = user_message
 
     payload = {
-        "model": _cfg.OPENROUTER_MODEL,
+        "model": _active_model(),
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
@@ -450,7 +481,7 @@ def chat_with_context_multiturn(
     messages.append({"role": "user", "content": user_message})
 
     payload = {
-        "model": _cfg.OPENROUTER_MODEL,
+        "model": _active_model(),
         "messages": messages,
         "temperature": _cfg.LLM_TEMPERATURE,
         "max_tokens": _cfg.LLM_MAX_TOKENS,

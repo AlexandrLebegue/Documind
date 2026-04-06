@@ -1422,9 +1422,12 @@ def _mask_api_key(key: str) -> str:
 async def get_settings():
     """Return current settings. The API key is masked for security."""
     return SettingsResponse(
+        ai_provider=_config_module.AI_PROVIDER,
         openrouter_api_key=_mask_api_key(_config_module.OPENROUTER_API_KEY),
         openrouter_model=_config_module.OPENROUTER_MODEL,
         openrouter_base_url=_config_module.OPENROUTER_BASE_URL,
+        ollama_base_url=_config_module.OLLAMA_BASE_URL,
+        ollama_model=_config_module.OLLAMA_MODEL,
         data_dir=DATA_DIR,
     )
 
@@ -1441,6 +1444,9 @@ async def update_settings(body: SettingsUpdateRequest):
     current = load_settings()
 
     # Merge in the new values (only non-None fields)
+    if body.ai_provider is not None:
+        current["ai_provider"] = body.ai_provider
+        _config_module.AI_PROVIDER = body.ai_provider
     if body.openrouter_api_key is not None:
         current["openrouter_api_key"] = body.openrouter_api_key
         _config_module.OPENROUTER_API_KEY = body.openrouter_api_key
@@ -1450,6 +1456,12 @@ async def update_settings(body: SettingsUpdateRequest):
     if body.openrouter_base_url is not None:
         current["openrouter_base_url"] = body.openrouter_base_url
         _config_module.OPENROUTER_BASE_URL = body.openrouter_base_url
+    if body.ollama_base_url is not None:
+        current["ollama_base_url"] = body.ollama_base_url
+        _config_module.OLLAMA_BASE_URL = body.ollama_base_url
+    if body.ollama_model is not None:
+        current["ollama_model"] = body.ollama_model
+        _config_module.OLLAMA_MODEL = body.ollama_model
 
     # Persist to disk
     save_settings(current)
@@ -1467,9 +1479,12 @@ async def update_settings(body: SettingsUpdateRequest):
         logger.warning("LLM client not available after settings update: %s", exc)
 
     return SettingsResponse(
+        ai_provider=_config_module.AI_PROVIDER,
         openrouter_api_key=_mask_api_key(_config_module.OPENROUTER_API_KEY),
         openrouter_model=_config_module.OPENROUTER_MODEL,
         openrouter_base_url=_config_module.OPENROUTER_BASE_URL,
+        ollama_base_url=_config_module.OLLAMA_BASE_URL,
+        ollama_model=_config_module.OLLAMA_MODEL,
         data_dir=DATA_DIR,
     )
 

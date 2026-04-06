@@ -19,9 +19,12 @@ export default function SettingsPage() {
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
 
   // Form state
+  const [provider, setProvider] = useState('openrouter');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState('');
+  const [ollamaModel, setOllamaModel] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [apiKeyChanged, setApiKeyChanged] = useState(false);
 
@@ -30,9 +33,12 @@ export default function SettingsPage() {
       try {
         const data = await getSettings();
         setSettings(data);
+        setProvider(data.ai_provider ?? 'openrouter');
         setApiKey(data.openrouter_api_key);
         setModel(data.openrouter_model);
         setBaseUrl(data.openrouter_base_url);
+        setOllamaBaseUrl(data.ollama_base_url ?? 'http://localhost:11434');
+        setOllamaModel(data.ollama_model ?? 'llama3.2');
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Erreur de chargement');
       } finally {
@@ -102,6 +108,9 @@ export default function SettingsPage() {
     try {
       const payload: Record<string, string> = {};
 
+      if (provider !== settings?.ai_provider) {
+        payload.ai_provider = provider;
+      }
       // Only send API key if it was actually changed (not the masked value)
       if (apiKeyChanged && apiKey) {
         payload.openrouter_api_key = apiKey;
@@ -111,6 +120,12 @@ export default function SettingsPage() {
       }
       if (baseUrl !== settings?.openrouter_base_url) {
         payload.openrouter_base_url = baseUrl;
+      }
+      if (ollamaBaseUrl !== settings?.ollama_base_url) {
+        payload.ollama_base_url = ollamaBaseUrl;
+      }
+      if (ollamaModel !== settings?.ollama_model) {
+        payload.ollama_model = ollamaModel;
       }
 
       if (Object.keys(payload).length === 0) {
@@ -122,7 +137,10 @@ export default function SettingsPage() {
 
       const updated = await updateSettings(payload);
       setSettings(updated);
+      setProvider(updated.ai_provider ?? 'openrouter');
       setApiKey(updated.openrouter_api_key);
+      setOllamaBaseUrl(updated.ollama_base_url ?? 'http://localhost:11434');
+      setOllamaModel(updated.ollama_model ?? 'llama3.2');
       setApiKeyChanged(false);
       setShowApiKey(false);
       setSuccess(true);
@@ -184,7 +202,7 @@ export default function SettingsPage() {
         </div>
       )}
 
-      {/* API Configuration Section */}
+      {/* AI Provider Section */}
       <div className="bg-white border border-beige-300 rounded-xl p-4 sm:p-6 space-y-5">
         <div className="flex items-center gap-2">
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#2E75B6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -192,103 +210,165 @@ export default function SettingsPage() {
             <path d="M6 9V6C6 3.8 7.8 2 10 2C12.2 2 14 3.8 14 6V9" />
             <circle cx="10" cy="13" r="1" fill="#2E75B6" />
           </svg>
-          <h2 className="text-lg font-semibold text-[#1a1a1a]">Configuration API</h2>
+          <h2 className="text-lg font-semibold text-[#1a1a1a]">Configuration IA</h2>
         </div>
 
-        {/* API Key */}
+        {/* Provider selector */}
         <div className="space-y-1.5">
-          <label htmlFor="api-key" className="block text-sm font-medium text-[#1a1a1a]">
-            Clé API OpenRouter
-          </label>
-          <div className="relative">
-            <input
-              id="api-key"
-              type={showApiKey ? 'text' : 'password'}
-              value={apiKey}
-              onChange={(e) => {
-                setApiKey(e.target.value);
-                setApiKeyChanged(true);
-              }}
-              onFocus={() => {
-                // Clear masked value on focus so user can type new key
-                if (!apiKeyChanged) {
-                  setApiKey('');
-                  setApiKeyChanged(true);
-                }
-              }}
-              placeholder="sk-or-..."
-              className="w-full px-3 py-2.5 pr-10 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
-            />
-            <button
-              type="button"
-              onClick={() => setShowApiKey(!showApiKey)}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#6b7280] hover:text-[#1a1a1a] transition-colors"
-              aria-label={showApiKey ? 'Masquer la clé' : 'Afficher la clé'}
-            >
-              {showApiKey ? (
-                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 3L17 17" />
-                  <path d="M10 5C13 5 16 8 17 10C16.5 11 15.5 12.5 14 13.5" />
-                  <path d="M6 6.5C4.5 7.5 3.5 9 3 10C4 12 7 15 10 15C11 15 12 14.7 13 14.2" />
-                </svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M10 5C13 5 16 8 17 10C16 12 13 15 10 15C7 15 4 12 3 10C4 8 7 5 10 5Z" />
-                  <circle cx="10" cy="10" r="2.5" />
-                </svg>
-              )}
-            </button>
+          <label className="block text-sm font-medium text-[#1a1a1a]">Fournisseur IA</label>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { value: 'openrouter', label: 'OpenRouter', desc: 'API cloud (Gemini, Claude…)' },
+              { value: 'ollama', label: 'Ollama', desc: 'Proxmox / local' },
+              { value: 'custom', label: 'Personnalisé', desc: 'Endpoint OpenAI-compatible' },
+            ].map((p) => (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => setProvider(p.value)}
+                className={`flex flex-col items-start px-3 py-2.5 rounded-lg border text-left transition-colors ${
+                  provider === p.value
+                    ? 'border-accent bg-accent/5 text-accent'
+                    : 'border-beige-300 bg-beige-50 text-[#1a1a1a] hover:bg-beige-100'
+                }`}
+              >
+                <span className="text-sm font-medium">{p.label}</span>
+                <span className="text-xs text-[#9ca3af] mt-0.5">{p.desc}</span>
+              </button>
+            ))}
           </div>
-          <p className="text-xs text-[#9ca3af]">
-            Clé API de votre compte OpenRouter. Cliquez sur le champ pour saisir une nouvelle clé.
-          </p>
         </div>
 
-        {/* Base URL */}
-        <div className="space-y-1.5">
-          <label htmlFor="base-url" className="block text-sm font-medium text-[#1a1a1a]">
-            URL de base OpenRouter
-          </label>
-          <input
-            id="base-url"
-            type="url"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://openrouter.ai/api/v1"
-            className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
-          />
-          <p className="text-xs text-[#9ca3af]">
-            Modifiez seulement si vous utilisez un proxy ou un endpoint personnalisé.
-          </p>
-        </div>
-      </div>
+        {/* Ollama fields */}
+        {provider === 'ollama' && (
+          <>
+            <div className="space-y-1.5">
+              <label htmlFor="ollama-url" className="block text-sm font-medium text-[#1a1a1a]">
+                URL Ollama
+              </label>
+              <input
+                id="ollama-url"
+                type="url"
+                value={ollamaBaseUrl}
+                onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                placeholder="http://192.168.1.50:11434"
+                className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+              <p className="text-xs text-[#9ca3af]">
+                IP ou hostname de votre instance Ollama sur Proxmox (port 11434 par défaut).
+              </p>
+            </div>
 
-      {/* AI Model Section */}
-      <div className="bg-white border border-beige-300 rounded-xl p-4 sm:p-6 space-y-5">
-        <div className="flex items-center gap-2">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#2E75B6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="10" cy="10" r="7" />
-            <path d="M10 6V10L13 12" />
-          </svg>
-          <h2 className="text-lg font-semibold text-[#1a1a1a]">Modèle IA</h2>
-        </div>
+            <div className="space-y-1.5">
+              <label htmlFor="ollama-model" className="block text-sm font-medium text-[#1a1a1a]">
+                Modèle Ollama
+              </label>
+              <input
+                id="ollama-model"
+                type="text"
+                value={ollamaModel}
+                onChange={(e) => setOllamaModel(e.target.value)}
+                placeholder="llama3.2"
+                className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+              <p className="text-xs text-[#9ca3af]">
+                Nom du modèle tel qu&apos;affiché par <code className="font-mono">ollama list</code> (ex: llama3.2, mistral, gemma3).
+              </p>
+            </div>
+          </>
+        )}
 
-        <div className="space-y-1.5">
-          <label htmlFor="model" className="block text-sm font-medium text-[#1a1a1a]">
-            Modèle OpenRouter
-          </label>
-          <input
-            id="model"
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="google/gemini-3.1-pro-preview"
-            className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
-          />
-          <p className="text-xs text-[#9ca3af]">
-            Identifiant du modèle sur OpenRouter (ex: google/gemini-3.1-pro-preview, anthropic/claude-sonnet-4).
-          </p>
-        </div>
+        {/* OpenRouter fields */}
+        {(provider === 'openrouter' || provider === 'custom') && (
+          <>
+            <div className="space-y-1.5">
+              <label htmlFor="api-key" className="block text-sm font-medium text-[#1a1a1a]">
+                Clé API
+              </label>
+              <div className="relative">
+                <input
+                  id="api-key"
+                  type={showApiKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={(e) => {
+                    setApiKey(e.target.value);
+                    setApiKeyChanged(true);
+                  }}
+                  onFocus={() => {
+                    if (!apiKeyChanged) {
+                      setApiKey('');
+                      setApiKeyChanged(true);
+                    }
+                  }}
+                  placeholder={provider === 'openrouter' ? 'sk-or-...' : 'Bearer token ou clé API'}
+                  className="w-full px-3 py-2.5 pr-10 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#6b7280] hover:text-[#1a1a1a] transition-colors"
+                  aria-label={showApiKey ? 'Masquer la clé' : 'Afficher la clé'}
+                >
+                  {showApiKey ? (
+                    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 3L17 17" />
+                      <path d="M10 5C13 5 16 8 17 10C16.5 11 15.5 12.5 14 13.5" />
+                      <path d="M6 6.5C4.5 7.5 3.5 9 3 10C4 12 7 15 10 15C11 15 12 14.7 13 14.2" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M10 5C13 5 16 8 17 10C16 12 13 15 10 15C7 15 4 12 3 10C4 8 7 5 10 5Z" />
+                      <circle cx="10" cy="10" r="2.5" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+              <p className="text-xs text-[#9ca3af]">
+                {provider === 'openrouter'
+                  ? 'Clé API de votre compte OpenRouter. Cliquez sur le champ pour saisir une nouvelle clé.'
+                  : 'Clé d\'authentification pour votre endpoint personnalisé.'}
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="base-url" className="block text-sm font-medium text-[#1a1a1a]">
+                {provider === 'openrouter' ? 'URL de base OpenRouter' : 'URL de base'}
+              </label>
+              <input
+                id="base-url"
+                type="url"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder={provider === 'openrouter' ? 'https://openrouter.ai/api/v1' : 'https://my-llm-proxy/v1'}
+                className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+              <p className="text-xs text-[#9ca3af]">
+                {provider === 'openrouter'
+                  ? 'Modifiez seulement si vous utilisez un proxy ou un endpoint personnalisé.'
+                  : 'URL de base de votre endpoint OpenAI-compatible (sans /chat/completions).'}
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="model" className="block text-sm font-medium text-[#1a1a1a]">
+                Modèle
+              </label>
+              <input
+                id="model"
+                type="text"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder={provider === 'openrouter' ? 'google/gemini-3.1-pro-preview' : 'gpt-4o'}
+                className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+              <p className="text-xs text-[#9ca3af]">
+                {provider === 'openrouter'
+                  ? 'Identifiant du modèle sur OpenRouter (ex: google/gemini-3.1-pro-preview, anthropic/claude-sonnet-4).'
+                  : 'Identifiant du modèle exposé par votre endpoint.'}
+              </p>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Storage Section */}

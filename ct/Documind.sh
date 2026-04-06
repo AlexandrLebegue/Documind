@@ -174,28 +174,28 @@ if [[ "$INSTALL_METHOD" == "docker" ]]; then
   "
   msg_ok "Docker CE installed"
 
-  # -- Fetch docker-compose.yml and .env from GitHub --------------------------
-  msg_info "Fetching DocuMind configuration from GitHub"
+  # -- Clone full repo (docker compose build needs the source) ----------------
+  msg_info "Cloning DocuMind repository"
   pct exec "${CTID}" -- bash -c "
     set -e
-    mkdir -p /opt/documind
-    curl -fsSL '${GITHUB_RAW}/docker-compose.yml' -o /opt/documind/docker-compose.yml
-    curl -fsSL '${GITHUB_RAW}/.env.example'        -o /opt/documind/.env
-
-    # Replace the CIFS NAS volume with a simple local bind-mount so the
-    # container works out-of-the-box without NAS configuration.
-    # Users who want NAS storage can edit /opt/documind/docker-compose.yml manually.
-    python3 - <<'PYEOF'
-import re, pathlib
-p = pathlib.Path('/opt/documind/docker-compose.yml')
-txt = p.read_text()
-# Remove the driver_opts block (NAS-specific), keep named volume with local driver
-txt = re.sub(r'(  documind-data:\n    driver: local\n)    driver_opts:.*?(?=\n\S|\Z)',
-             r'\1', txt, flags=re.DOTALL)
-p.write_text(txt)
-PYEOF
+    apt-get install -y --no-install-recommends git -qq
+    git clone --depth=1 https://github.com/AlexandrLebegue/Documind.git /opt/documind
+    cp /opt/documind/.env.example /opt/documind/.env
   "
-  msg_ok "docker-compose.yml ready at /opt/documind/"
+  msg_ok "Repository cloned to /opt/documind/"
+
+  # -- Override the CIFS volume with a plain local volume ---------------------
+  msg_info "Configuring local data volume (override NAS settings)"
+  pct exec "${CTID}" -- bash -c "
+    cat > /opt/documind/docker-compose.override.yml <<'OVERRIDE'
+# Overrides the NAS/CIFS volume from docker-compose.yml with a plain local volume.
+# Edit /opt/documind/docker-compose.yml to restore NAS storage.
+volumes:
+  documind-data:
+    driver: local
+OVERRIDE
+  "
+  msg_ok "docker-compose.override.yml written (uses local storage)"
 
   # -- Create systemd unit to manage the Compose stack ------------------------
   msg_info "Creating documind-docker.service"
