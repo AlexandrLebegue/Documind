@@ -20,7 +20,3 @@ services:
 volumes:
   documind-data:
     driver: local
-    driver_opts:
-      type: cifs
-      device: "//192.168.1.100/NAS_Commun_Vol2/DOCUMIND"
-      o: "addr=192.168.1.100,username=${NAS_USERNAME:-guest},password=${NAS_PASSWORD:-},file_mode=0777,dir_mode=0777,vers=3.0"

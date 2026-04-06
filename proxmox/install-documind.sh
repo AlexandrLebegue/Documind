@@ -330,13 +330,15 @@ build_frontend() {
 # --------------------------------------------------
 create_env_file() {
     msg_info "Creating environment configuration..."
-    pct exec "$CTID" -- bash -c "cat > ${APP_DIR}/.env << 'ENVEOF'
+    cat > /tmp/documind.env <<ENVEOF
 # DocuMind Environment Configuration
 DOCUMIND_DATA_DIR=${DATA_DIR}
 OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
 OPENROUTER_MODEL=${OPENROUTER_MODEL}
 PYTHONUNBUFFERED=1
-ENVEOF"
+ENVEOF
+    pct push "$CTID" /tmp/documind.env "${APP_DIR}/.env"
+    rm -f /tmp/documind.env
     msg_ok "Environment file created at ${APP_DIR}/.env"
 }
 
@@ -345,7 +347,7 @@ ENVEOF"
 # --------------------------------------------------
 create_service() {
     msg_info "Creating systemd service..."
-    pct exec "$CTID" -- bash -c "cat > /etc/systemd/system/documind.service << 'SVCEOF'
+    cat > /tmp/documind.service <<SVCEOF
 [Unit]
 Description=DocuMind — Document Management with AI
 After=network.target
@@ -364,8 +366,9 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-SVCEOF"
-
+SVCEOF
+    pct push "$CTID" /tmp/documind.service /etc/systemd/system/documind.service
+    rm -f /tmp/documind.service
     pct exec "$CTID" -- bash -c "systemctl daemon-reload && systemctl enable documind.service"
     msg_ok "Systemd service created and enabled."
 }

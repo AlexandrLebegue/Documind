@@ -43,7 +43,8 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 
 # Copy application code
 COPY main.py config.py database.py models.py pipeline.py \
-     ocr.py llm.py embeddings.py search.py prompts.py ./
+     ocr.py llm.py embeddings.py search.py prompts.py \
+     agent.py web_tools.py update.py ./
 
 # Copy pre-built frontend from Stage 1
 COPY --from=frontend-builder /frontend/out ./static/

@@ -63,15 +63,15 @@ msg_ok ".env created at /opt/documind/.env"
 # in most environments. The override replaces it with a simple local volume.
 # ---------------------------------------------------------------------------
 msg_info "Writing docker-compose.override.yml (local volume, no NAS)"
-pct exec "${CTID}" -- bash -c "
-  cat > /opt/documind/docker-compose.override.yml <<'OVERRIDE'
+cat > /tmp/documind-compose-override.yml <<'OVERRIDE'
 # This override replaces the NAS/CIFS volume defined in docker-compose.yml
 # with a plain local Docker volume. Delete this file to restore NAS mounting.
 volumes:
   documind-data:
     driver: local
 OVERRIDE
-"
+pct push "${CTID}" /tmp/documind-compose-override.yml /opt/documind/docker-compose.override.yml
+rm -f /tmp/documind-compose-override.yml
 msg_ok "docker-compose.override.yml written"
 
 # ---------------------------------------------------------------------------
@@ -91,8 +91,7 @@ pct exec "${CTID}" -- bash -c "
 # Step 6 — Update/create systemd service to auto-start on boot
 # ---------------------------------------------------------------------------
 msg_info "Updating documind-docker.service"
-pct exec "${CTID}" -- bash -c "
-  cat > /etc/systemd/system/documind-docker.service <<'EOF'
+cat > /tmp/documind-docker.service <<'EOF'
 [Unit]
 Description=DocuMind Docker Compose
 Requires=docker.service
@@ -113,9 +112,9 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
-  systemctl daemon-reload
-  systemctl enable documind-docker.service
-"
+pct push "${CTID}" /tmp/documind-docker.service /etc/systemd/system/documind-docker.service
+rm -f /tmp/documind-docker.service
+pct exec "${CTID}" -- bash -c "systemctl daemon-reload && systemctl enable documind-docker.service"
 msg_ok "documind-docker.service enabled"
 
 # ---------------------------------------------------------------------------

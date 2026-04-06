@@ -186,21 +186,20 @@ if [[ "$INSTALL_METHOD" == "docker" ]]; then
 
   # -- Override the CIFS volume with a plain local volume ---------------------
   msg_info "Configuring local data volume (override NAS settings)"
-  pct exec "${CTID}" -- bash -c "
-    cat > /opt/documind/docker-compose.override.yml <<'OVERRIDE'
+  cat > /tmp/documind-compose-override.yml <<'OVERRIDE'
 # Overrides the NAS/CIFS volume from docker-compose.yml with a plain local volume.
 # Edit /opt/documind/docker-compose.yml to restore NAS storage.
 volumes:
   documind-data:
     driver: local
 OVERRIDE
-  "
+  pct push "${CTID}" /tmp/documind-compose-override.yml /opt/documind/docker-compose.override.yml
+  rm -f /tmp/documind-compose-override.yml
   msg_ok "docker-compose.override.yml written (uses local storage)"
 
   # -- Create systemd unit to manage the Compose stack ------------------------
   msg_info "Creating documind-docker.service"
-  pct exec "${CTID}" -- bash -c "
-    cat > /etc/systemd/system/documind-docker.service <<'EOF'
+  cat > /tmp/documind-docker.service <<'EOF'
 [Unit]
 Description=DocuMind Docker Compose
 Requires=docker.service
@@ -221,9 +220,9 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload
-    systemctl enable documind-docker.service
-  "
+  pct push "${CTID}" /tmp/documind-docker.service /etc/systemd/system/documind-docker.service
+  rm -f /tmp/documind-docker.service
+  pct exec "${CTID}" -- bash -c "systemctl daemon-reload && systemctl enable documind-docker.service"
   msg_ok "documind-docker.service created and enabled"
 
   # -- Build and start the stack ----------------------------------------------
