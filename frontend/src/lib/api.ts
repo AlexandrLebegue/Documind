@@ -410,3 +410,20 @@ export async function dismissAlert(docId: string, alertType: 'expiration' | 'ech
 export async function undismissAlert(docId: string, alertType: 'expiration' | 'echeance'): Promise<void> {
   return fetchAPI(`/alerts/${docId}/dismiss?alert_type=${alertType}`, { method: 'DELETE' });
 }
+
+// Update
+export interface UpdateCheckResult {
+  up_to_date: boolean;
+  local_commit: string;
+  remote_commit: string;
+  behind_by: number;
+  error: string | null;
+}
+
+export async function checkForUpdate(): Promise<UpdateCheckResult> {
+  return fetchAPI('/update/check');
+}
+
+export async function applyUpdate(): Promise<{ status: string; message: string }> {
+  return fetchAPI('/update/apply', { method: 'POST' });
+}

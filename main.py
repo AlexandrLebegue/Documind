@@ -63,6 +63,7 @@ from search import hybrid_search, load_embeddings_cache, refresh_embeddings_cach
 from llm import init_llm_client, chat_with_context, chat_with_context_multiturn, analyze_procedure, match_document_for_procedure
 from embeddings import load_embedding_model
 from agent import run_agent
+from update import check_for_update, apply_update, install_dependencies, restart_server
 
 logger = logging.getLogger(__name__)
 
@@ -1471,6 +1472,51 @@ async def update_settings(body: SettingsUpdateRequest):
         openrouter_base_url=_config_module.OPENROUTER_BASE_URL,
         data_dir=DATA_DIR,
     )
+
+
+# ── Update ─────────────────────────────────────────────────────────────────
+
+
+@app.get(
+    "/api/update/check",
+    summary="Check for updates",
+    description="Fetch origin/main and compare with local HEAD. "
+    "Returns whether an update is available and how many commits behind.",
+)
+async def update_check():
+    """Check GitHub for a newer version without applying anything."""
+    return check_for_update()
+
+
+@app.post(
+    "/api/update/apply",
+    summary="Apply update and restart",
+    description="Run git pull, pip install -r requirements.txt, then restart "
+    "the server process via os.execv. The response is sent before restart.",
+)
+async def update_apply():
+    """Pull latest code, reinstall deps, and restart the server."""
+    import asyncio
+
+    async def _run():
+        # Small delay so the HTTP response is sent first
+        await asyncio.sleep(0.8)
+
+        ok, msg = apply_update()
+        if not ok:
+            logger.error("Update aborted (git pull failed): %s", msg)
+            return
+
+        ok, msg = install_dependencies()
+        if not ok:
+            logger.error("Update aborted (pip install failed): %s", msg)
+            return
+
+        logger.info("Restarting server after successful update")
+        restart_server()
+
+    asyncio.create_task(_run())
+    return {"status": "updating", "message": "Mise à jour en cours, redémarrage imminent…"}
 
 
 # ---------------------------------------------------------------------------

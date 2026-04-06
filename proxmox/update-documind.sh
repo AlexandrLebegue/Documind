@@ -217,7 +217,7 @@ push_backend() {
     msg_info "Pushing backend files to CT${CTID}:${APP_DIR}/..."
 
     local pushed=0
-    for f in main.py config.py database.py models.py pipeline.py ocr.py llm.py embeddings.py search.py prompts.py requirements.txt; do
+    for f in main.py config.py database.py models.py pipeline.py ocr.py llm.py embeddings.py search.py prompts.py agent.py web_tools.py update.py requirements.txt; do
         if [[ -f "${SOURCE_DIR}/${f}" ]]; then
             pct push "$CTID" "${SOURCE_DIR}/${f}" "${APP_DIR}/${f}"
             pushed=$((pushed + 1))
