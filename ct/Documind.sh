@@ -63,13 +63,22 @@ function update_script() {
   git reset --hard origin/main
   msg_ok "Code updated"
 
-  # Reinstall Python dependencies
-  msg_info "Updating Python dependencies"
+  # Reinstall core Python dependencies
+  msg_info "Updating core Python dependencies"
   /opt/documind/venv/bin/pip install --no-cache-dir -q \
     torch --index-url https://download.pytorch.org/whl/cpu
   /opt/documind/venv/bin/pip install --no-cache-dir -q \
     -r /opt/documind/requirements.txt
-  msg_ok "Python dependencies updated"
+  msg_ok "Core Python dependencies updated"
+
+  # Reinstall optional Python dependencies (allowed to fail)
+  msg_info "Updating optional Python dependencies"
+  if /opt/documind/venv/bin/pip install --no-cache-dir -q \
+      -r /opt/documind/requirements-optional.txt 2>/dev/null; then
+    msg_ok "Optional Python dependencies updated"
+  else
+    msg_info "Optional dependencies skipped (non-critical)"
+  fi
 
   # Rebuild frontend
   msg_info "Rebuilding frontend"

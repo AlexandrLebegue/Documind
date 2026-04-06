@@ -1,0 +1,6 @@
+# Optional — web-agent tools (crawling, search, link checking).
+# These are heavy packages with native dependencies (Chromium, etc.).
+# Install separately so a failure here does not block the core application.
+crawl4ai>=0.4.0
+duckduckgo-search>=6.0.0
+playwright>=1.40.0
