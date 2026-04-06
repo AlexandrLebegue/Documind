@@ -3,14 +3,39 @@
 # Author: AlexandrLebegue
 # License: MIT | https://github.com/community-scripts/ProxmoxVE/raw/main/LICENSE
 # Source: https://github.com/AlexandrLebegue/Documind
+#
+# Can be run in two ways:
+#   1. Via community-scripts build_container (FUNCTIONS_FILE_PATH is set)
+#   2. Standalone / curl-pipe  (no FUNCTIONS_FILE_PATH — stubs are used)
+#      curl -fsSL https://raw.githubusercontent.com/AlexandrLebegue/Documind/main/install/documind-install.sh | bash
 
-source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
-color
-verb_ip6
-catch_errors
-setting_up_container
-network_check
-update_os
+# ---------------------------------------------------------------------------
+# Bootstrap helpers — use community-scripts install.func when available,
+# otherwise fall back to minimal stubs so the script works standalone.
+# ---------------------------------------------------------------------------
+if [[ -n "${FUNCTIONS_FILE_PATH:-}" ]]; then
+  # Running inside community-scripts build_container
+  source /dev/stdin <<<"$FUNCTIONS_FILE_PATH"
+  color
+  verb_ip6
+  catch_errors
+  setting_up_container
+  network_check
+  update_os
+else
+  # Standalone / curl-pipe execution — define minimal stubs
+  set -Eeuo pipefail
+  function STD()              { "$@"; }                 # run commands verbosely
+  function msg_info()         { echo -e "  \e[1;34mℹ\e[0m  ${1}"; }
+  function msg_ok()           { echo -e "  \e[1;32m✓\e[0m  ${1}"; }
+  function msg_error()        { echo -e "  \e[1;31m✗\e[0m  ${1}"; exit 1; }
+  function motd_ssh()         { :; }
+  function customize()        { :; }
+  # Bootstrap the OS
+  echo -e "\n\e[1;36m  DocuMind — Standalone Installer\e[0m\n"
+  apt-get update -qq
+  apt-get upgrade -y -qq
+fi
 
 APP="Documind"
 APP_DIR="/opt/documind"
