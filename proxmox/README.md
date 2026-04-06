@@ -2,17 +2,45 @@
 
 Scripts for deploying and managing DocuMind as a Proxmox LXC container.
 
-## Scripts
+## Deployment methods
+
+### Method 1 — Proxmox Community Helper Scripts (recommended)
+
+The files `ct/Documind.sh` and `install/documind-install.sh` in this repo
+follow the [community-scripts/ProxmoxVE](https://github.com/community-scripts/ProxmoxVE)
+standard. Once the script is accepted upstream, you can run it directly from
+the Proxmox shell with a single command (no file copying needed):
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/Documind.sh)"
+```
+
+The community script:
+- Clones DocuMind from GitHub directly into the container
+- Installs all dependencies (Python 3.12, Node.js 20, Tesseract OCR, PyTorch CPU)
+- Builds the Next.js frontend
+- Creates and enables a `documind.service` systemd unit
+- Provides a built-in **update** flow (run the same script again on an existing container)
+
+After install, set your OpenRouter API key:
+
+```bash
+pct exec <CTID> -- nano /opt/documind/.env
+pct exec <CTID> -- systemctl restart documind
+```
+
+---
+
+### Method 2 — Standalone scripts (manual / offline)
+
+Use these when you want direct control or are working from a local copy
+of the project without internet access inside the container.
 
 | Script | Purpose |
 |--------|---------|
 | `install-documind.sh` | **Fresh install** — creates a new LXC container and deploys DocuMind from scratch |
 | `update-documind.sh` | **Update** — pushes code changes to an existing running container |
 | `proxmox-export.sh` | **Backup** — exports a container as a vzdump archive |
-
----
-
-## Fresh Install
 
 Creates a new Debian 12 LXC container, installs all dependencies, and deploys DocuMind.
 
