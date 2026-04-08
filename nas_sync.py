@@ -147,6 +147,51 @@ def _mime_for(path: Path) -> str:
 # Main sync entry point
 # ---------------------------------------------------------------------------
 
+def _scan_and_upload(scan_dir: Path, synced: set, summary: dict, api_url: str) -> dict:
+    """Scan scan_dir for documents and upload new ones. Mutates and returns summary."""
+    candidate_files: list[Path] = []
+    for ext in SUPPORTED_EXTENSIONS:
+        candidate_files.extend(scan_dir.rglob(f"*{ext}"))
+        candidate_files.extend(scan_dir.rglob(f"*{ext.upper()}"))
+
+    seen_paths: set[str] = set()
+    unique_files: list[Path] = []
+    for p in candidate_files:
+        key = str(p).lower()
+        if key not in seen_paths:
+            seen_paths.add(key)
+            unique_files.append(p)
+
+    summary["scanned"] = len(unique_files)
+    logger.info("Found %d candidate file(s) on NAS", len(unique_files))
+
+    for file_path in unique_files:
+        filename = file_path.name
+        if filename in synced:
+            summary["skipped"] += 1
+            continue
+        success = _upload_file(file_path, api_url)
+        if success:
+            _mark_synced(filename)
+            summary["imported"] += 1
+            summary["files_imported"].append(filename)
+        else:
+            summary["errors"] += 1
+            summary["files_errors"].append(filename)
+
+    logger.info(
+        "NAS sync done — scanned=%d imported=%d skipped=%d errors=%d",
+        summary["scanned"], summary["imported"], summary["skipped"], summary["errors"],
+    )
+    return summary
+
+
+def _mount_override() -> str | None:
+    """Return pre-mounted NAS path from env var, or None if not set."""
+    val = os.environ.get("NAS_MOUNT_OVERRIDE", "").strip()
+    return val if val else None
+
+
 def sync_from_nas(api_url: str = DOCUMIND_API_URL) -> dict:
     """Mount the NAS share, scan for new documents, and upload them.
 
@@ -177,6 +222,20 @@ def sync_from_nas(api_url: str = DOCUMIND_API_URL) -> dict:
         "files_errors": [],
     }
 
+    override = _mount_override()
+    if override:
+        # Running inside Docker on an LXC: NAS pre-mounted on the host, bind-mounted into container.
+        mount_point = override
+        mounted = False  # nothing to unmount
+        scan_dir = Path(mount_point) / cfg["path"]
+        if not scan_dir.exists():
+            summary["error_message"] = f"NAS path not found at override {scan_dir} — is the share mounted on the host?"
+            return summary
+        try:
+            return _scan_and_upload(scan_dir, synced, summary, api_url)
+        finally:
+            pass  # nothing to unmount
+
     mount_point = tempfile.mkdtemp(prefix="nas_documind_")
     mounted = False
 
@@ -191,54 +250,15 @@ def sync_from_nas(api_url: str = DOCUMIND_API_URL) -> dict:
             summary["error_message"] = f"NAS path not found after mount: {scan_dir}"
             return summary
 
-        # Recursively scan for supported document files
-        candidate_files: list[Path] = []
-        for ext in SUPPORTED_EXTENSIONS:
-            candidate_files.extend(scan_dir.rglob(f"*{ext}"))
-            candidate_files.extend(scan_dir.rglob(f"*{ext.upper()}"))
-
-        # Deduplicate (rglob with lower+upper may double-count on case-insensitive FS)
-        seen_paths: set[str] = set()
-        unique_files: list[Path] = []
-        for p in candidate_files:
-            key = str(p).lower()
-            if key not in seen_paths:
-                seen_paths.add(key)
-                unique_files.append(p)
-
-        summary["scanned"] = len(unique_files)
-        logger.info("Found %d candidate file(s) on NAS", len(unique_files))
-
-        for file_path in unique_files:
-            filename = file_path.name
-
-            if filename in synced:
-                summary["skipped"] += 1
-                continue
-
-            success = _upload_file(file_path, api_url)
-            if success:
-                _mark_synced(filename)
-                summary["imported"] += 1
-                summary["files_imported"].append(filename)
-            else:
-                summary["errors"] += 1
-                summary["files_errors"].append(filename)
+        return _scan_and_upload(scan_dir, synced, summary, api_url)
 
     finally:
         if mounted:
             _umount_cifs(mount_point)
-        # Remove empty temp dir
         try:
             os.rmdir(mount_point)
         except OSError:
             pass
-
-    logger.info(
-        "NAS sync done — scanned=%d imported=%d skipped=%d errors=%d",
-        summary["scanned"], summary["imported"], summary["skipped"], summary["errors"],
-    )
-    return summary
 
 
 # ---------------------------------------------------------------------------

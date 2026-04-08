@@ -9,12 +9,14 @@ services:
       - "8000:8000"
     volumes:
       - documind-data:/data
+      # NAS share pre-mounted on CT105 at /mnt/nas_documind by the host cron/fstab.
+      # bind-mounted read-only into the container — no CAP_SYS_ADMIN needed.
+      - /mnt/nas_documind:/mnt/nas_documind:ro
     env_file:
       - .env
     environment:
       - DOCUMIND_DATA_DIR=/data
-    cap_add:
-      - SYS_ADMIN
+      - NAS_MOUNT_OVERRIDE=/mnt/nas_documind
     restart: unless-stopped
     deploy:
       resources:
