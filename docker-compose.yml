@@ -13,8 +13,9 @@ services:
       - .env
     environment:
       - DOCUMIND_DATA_DIR=/data
+    cap_add:
+      - SYS_ADMIN
     restart: unless-stopped
-    # Resource limits (optional — lighter now without local LLM)
     deploy:
       resources:
         limits:
