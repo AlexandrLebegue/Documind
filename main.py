@@ -15,7 +15,7 @@ from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 import config as _config_module
@@ -233,6 +233,14 @@ async def lifespan(app: FastAPI):
     # 4. Load embeddings cache
     app.state.embeddings_cache = load_embeddings_cache()
     logger.info("Embeddings cache loaded: %d documents", len(app.state.embeddings_cache))
+
+    # 5. Sync crontab with saved NAS settings (idempotent, no-op on Windows)
+    try:
+        from nas_sync import apply_cron_schedule
+        cron_result = apply_cron_schedule()
+        logger.info("Cron schedule on startup: %s", cron_result)
+    except Exception as exc:
+        logger.warning("Could not apply cron schedule on startup: %s", exc)
 
     yield
 
@@ -798,6 +806,93 @@ async def agent_chat(body: AgentChatRequest) -> AgentChatResponse:
         session_id=session_id,
         tool_calls_log=[ToolCallLog(**tc) for tc in tool_calls_log],
     )
+
+
+@app.post("/api/agent/chat/stream")
+async def agent_chat_stream(body: AgentChatRequest) -> StreamingResponse:
+    """Streaming SSE version of agent chat — emits tool_start, tool_done, and done events."""
+    if app.state.llm is None:
+        raise HTTPException(status_code=503, detail="LLM not loaded.")
+
+    # Resolve or create session
+    session_id = body.session_id
+    if session_id:
+        session = get_chat_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"Chat session '{session_id}' not found")
+    else:
+        session_id = str(uuid.uuid4())
+        title = body.message[:50].strip() + ("…" if len(body.message) > 50 else "")
+        create_chat_session(session_id, title)
+        logger.info("Agent stream: auto-created session %s: '%s'", session_id, title)
+
+    insert_chat_message(str(uuid.uuid4()), body.message, "user", session_id)
+    conversation_history = get_session_messages_for_llm(session_id, limit=20)
+
+    async def event_stream():
+        # Send session_id first so the frontend can track it immediately
+        yield f"data: {json.dumps({'type': 'session', 'session_id': session_id})}\n\n"
+
+        tool_calls_log: list[dict] = []
+
+        async def on_tool_start(name: str, args: dict) -> None:
+            event = json.dumps({"type": "tool_start", "tool": name, "args": args})
+            yield_queue.append(f"data: {event}\n\n")
+
+        async def on_tool_done(name: str, args: dict, result: str) -> None:
+            event = json.dumps({
+                "type": "tool_done",
+                "tool": name,
+                "args": args,
+                "result_preview": result[:300],
+            })
+            yield_queue.append(f"data: {event}\n\n")
+
+        # Use a queue to bridge callbacks → async generator
+        yield_queue: list[str] = []
+
+        import asyncio
+
+        async def run():
+            return await run_agent(
+                llm_client=app.state.llm,
+                user_message=body.message,
+                context_procedure=body.context_procedure,
+                conversation_history=conversation_history,
+                on_tool_start=on_tool_start,
+                on_tool_done=on_tool_done,
+            )
+
+        task = asyncio.create_task(run())
+
+        while not task.done():
+            await asyncio.sleep(0.05)
+            while yield_queue:
+                yield yield_queue.pop(0)
+
+        # Drain any remaining events
+        while yield_queue:
+            yield yield_queue.pop(0)
+
+        try:
+            reply, tool_calls_log = task.result()
+        except Exception as exc:
+            logger.error("Agent stream failed: %s", exc)
+            yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+            return
+
+        insert_chat_message(
+            str(uuid.uuid4()), reply, "assistant", session_id,
+            tool_calls=tool_calls_log if tool_calls_log else None,
+        )
+        update_chat_session_timestamp(session_id)
+
+        yield f"data: {json.dumps({'type': 'done', 'reply': reply, 'session_id': session_id, 'tool_calls_log': tool_calls_log})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    })
 
 
 @app.get(
@@ -1421,6 +1516,7 @@ def _mask_api_key(key: str) -> str:
 )
 async def get_settings():
     """Return current settings. The API key is masked for security."""
+    saved = load_settings()
     return SettingsResponse(
         ai_provider=_config_module.AI_PROVIDER,
         openrouter_api_key=_mask_api_key(_config_module.OPENROUTER_API_KEY),
@@ -1429,6 +1525,13 @@ async def get_settings():
         ollama_base_url=_config_module.OLLAMA_BASE_URL,
         ollama_model=_config_module.OLLAMA_MODEL,
         data_dir=DATA_DIR,
+        nas_sync_enabled=saved.get("nas_sync_enabled", False),
+        nas_host=saved.get("nas_host", "192.168.1.100"),
+        nas_share=saved.get("nas_share", "NAS_Commun_Vol2"),
+        nas_path=saved.get("nas_path", "DOCUMIND/originals"),
+        nas_username=saved.get("nas_username", ""),
+        nas_sync_hour=saved.get("nas_sync_hour", 7),
+        nas_sync_minute=saved.get("nas_sync_minute", 0),
     )
 
 
@@ -1463,6 +1566,33 @@ async def update_settings(body: SettingsUpdateRequest):
         current["ollama_model"] = body.ollama_model
         _config_module.OLLAMA_MODEL = body.ollama_model
 
+    # NAS sync settings
+    nas_changed = False
+    if body.nas_sync_enabled is not None:
+        current["nas_sync_enabled"] = body.nas_sync_enabled
+        nas_changed = True
+    if body.nas_host is not None:
+        current["nas_host"] = body.nas_host
+        nas_changed = True
+    if body.nas_share is not None:
+        current["nas_share"] = body.nas_share
+        nas_changed = True
+    if body.nas_path is not None:
+        current["nas_path"] = body.nas_path
+        nas_changed = True
+    if body.nas_username is not None:
+        current["nas_username"] = body.nas_username
+        nas_changed = True
+    if body.nas_password is not None:
+        current["nas_password"] = body.nas_password
+        nas_changed = True
+    if body.nas_sync_hour is not None:
+        current["nas_sync_hour"] = body.nas_sync_hour
+        nas_changed = True
+    if body.nas_sync_minute is not None:
+        current["nas_sync_minute"] = body.nas_sync_minute
+        nas_changed = True
+
     # Persist to disk
     save_settings(current)
     logger.info("Settings saved to disk")
@@ -1478,6 +1608,12 @@ async def update_settings(body: SettingsUpdateRequest):
         app.state.llm = None
         logger.warning("LLM client not available after settings update: %s", exc)
 
+    # Apply cron schedule when NAS settings changed
+    if nas_changed:
+        from nas_sync import apply_cron_schedule
+        cron_result = apply_cron_schedule()
+        logger.info("Cron schedule update: %s", cron_result)
+
     return SettingsResponse(
         ai_provider=_config_module.AI_PROVIDER,
         openrouter_api_key=_mask_api_key(_config_module.OPENROUTER_API_KEY),
@@ -1486,6 +1622,13 @@ async def update_settings(body: SettingsUpdateRequest):
         ollama_base_url=_config_module.OLLAMA_BASE_URL,
         ollama_model=_config_module.OLLAMA_MODEL,
         data_dir=DATA_DIR,
+        nas_sync_enabled=current.get("nas_sync_enabled", False),
+        nas_host=current.get("nas_host", "192.168.1.100"),
+        nas_share=current.get("nas_share", "NAS_Commun_Vol2"),
+        nas_path=current.get("nas_path", "DOCUMIND/originals"),
+        nas_username=current.get("nas_username", ""),
+        nas_sync_hour=current.get("nas_sync_hour", 7),
+        nas_sync_minute=current.get("nas_sync_minute", 0),
     )
 
 
@@ -1532,6 +1675,51 @@ async def update_apply():
 
     asyncio.create_task(_run())
     return {"status": "updating", "message": "Mise à jour en cours, redémarrage imminent…"}
+
+
+# ---------------------------------------------------------------------------
+# NAS Sync
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/api/sync/nas",
+    summary="Sync documents from NAS",
+    description=(
+        "Mount the configured CIFS/SMB NAS share and import any new documents "
+        "that have not yet been uploaded to Documind. "
+        "Requires cifs-utils installed in the container and proper NAS credentials "
+        "in NAS_USERNAME / NAS_PASSWORD environment variables."
+    ),
+)
+async def sync_nas(background_tasks: BackgroundTasks) -> JSONResponse:
+    """Trigger a NAS → Documind document sync in the background."""
+    from nas_sync import sync_from_nas
+
+    def _run_sync() -> None:
+        summary = sync_from_nas()
+        logger.info("NAS sync completed: %s", summary)
+
+    background_tasks.add_task(_run_sync)
+    return JSONResponse(
+        status_code=202,
+        content={"status": "accepted", "message": "NAS sync started in background."},
+    )
+
+
+@app.post(
+    "/api/sync/nas/blocking",
+    summary="Sync documents from NAS (blocking)",
+    description="Same as /api/sync/nas but waits for the sync to complete and returns the full summary.",
+)
+async def sync_nas_blocking() -> JSONResponse:
+    """Trigger a NAS → Documind document sync synchronously and return the result."""
+    import asyncio
+    from nas_sync import sync_from_nas
+
+    loop = asyncio.get_event_loop()
+    summary = await loop.run_in_executor(None, sync_from_nas)
+    return JSONResponse(content=summary)
 
 
 # ---------------------------------------------------------------------------

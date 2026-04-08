@@ -269,6 +269,14 @@ class SettingsResponse(BaseModel):
     ollama_base_url: str
     ollama_model: str
     data_dir: str
+    # NAS sync settings
+    nas_sync_enabled: bool = False
+    nas_host: str = "192.168.1.100"
+    nas_share: str = "NAS_Commun_Vol2"
+    nas_path: str = "DOCUMIND/originals"
+    nas_username: str = ""
+    nas_sync_hour: int = Field(7, ge=0, le=23, description="Hour (0-23) at which the daily sync runs")
+    nas_sync_minute: int = Field(0, ge=0, le=59, description="Minute (0-59) at which the daily sync runs")
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -292,6 +300,15 @@ class SettingsUpdateRequest(BaseModel):
     ollama_model: Optional[str] = Field(
         None, description="Ollama model name (e.g. llama3.2, mistral)"
     )
+    # NAS sync settings
+    nas_sync_enabled: Optional[bool] = None
+    nas_host: Optional[str] = None
+    nas_share: Optional[str] = None
+    nas_path: Optional[str] = None
+    nas_username: Optional[str] = None
+    nas_password: Optional[str] = Field(None, description="NAS password (write-only, never returned)")
+    nas_sync_hour: Optional[int] = Field(None, ge=0, le=23)
+    nas_sync_minute: Optional[int] = Field(None, ge=0, le=59)
 
 
 # ---------------------------------------------------------------------------

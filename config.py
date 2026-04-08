@@ -70,7 +70,7 @@ OLLAMA_BASE_URL = _saved.get(
 )
 OLLAMA_MODEL = _saved.get(
     "ollama_model",
-    os.environ.get("OLLAMA_MODEL", "llama3.2"),
+    os.environ.get("OLLAMA_MODEL", "qwen3.5:2b"),
 )
 LLM_TEMPERATURE = 0.1
 LLM_MAX_TOKENS = 2048

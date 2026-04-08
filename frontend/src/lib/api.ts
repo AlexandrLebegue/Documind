@@ -75,6 +75,13 @@ export interface Settings {
   ollama_base_url: string;
   ollama_model: string;
   data_dir: string;
+  nas_sync_enabled: boolean;
+  nas_host: string;
+  nas_share: string;
+  nas_path: string;
+  nas_username: string;
+  nas_sync_hour: number;
+  nas_sync_minute: number;
 }
 
 export interface SettingsUpdate {
@@ -84,6 +91,24 @@ export interface SettingsUpdate {
   openrouter_base_url?: string;
   ollama_base_url?: string;
   ollama_model?: string;
+  nas_sync_enabled?: boolean;
+  nas_host?: string;
+  nas_share?: string;
+  nas_path?: string;
+  nas_username?: string;
+  nas_password?: string;
+  nas_sync_hour?: number;
+  nas_sync_minute?: number;
+}
+
+export interface NasSyncResult {
+  scanned: number;
+  imported: number;
+  skipped: number;
+  errors: number;
+  files_imported: string[];
+  files_errors: string[];
+  error_message?: string;
 }
 
 // Procedure types
@@ -256,6 +281,66 @@ export async function sendAgentMessage(
       context_procedure: contextProcedure || '',
     }),
   });
+}
+
+export type AgentStreamEvent =
+  | { type: 'session'; session_id: string }
+  | { type: 'tool_start'; tool: string; args: Record<string, unknown> }
+  | { type: 'tool_done'; tool: string; args: Record<string, unknown>; result_preview: string }
+  | { type: 'done'; reply: string; session_id: string; tool_calls_log: ToolCallLog[] }
+  | { type: 'error'; message: string };
+
+export function streamAgentMessage(
+  message: string,
+  sessionId: string | undefined,
+  onEvent: (event: AgentStreamEvent) => void,
+  contextProcedure?: string,
+): () => void {
+  const controller = new AbortController();
+
+  (async () => {
+    const res = await fetch(`${API_BASE}/agent/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        session_id: sessionId || null,
+        context_procedure: contextProcedure || '',
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => '');
+      onEvent({ type: 'error', message: `API Error ${res.status}: ${text}` });
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            onEvent(JSON.parse(line.slice(6)));
+          } catch { /* ignore malformed */ }
+        }
+      }
+    }
+  })().catch((err) => {
+    if (err?.name !== 'AbortError') {
+      onEvent({ type: 'error', message: String(err) });
+    }
+  });
+
+  return () => controller.abort();
 }
 
 export async function getChatHistory(
@@ -432,4 +517,13 @@ export async function checkForUpdate(): Promise<UpdateCheckResult> {
 
 export async function applyUpdate(): Promise<{ status: string; message: string }> {
   return fetchAPI('/update/apply', { method: 'POST' });
+}
+
+// NAS Sync
+export async function triggerNasSync(): Promise<NasSyncResult> {
+  return fetchAPI('/sync/nas/blocking', { method: 'POST' });
+}
+
+export async function triggerNasSyncBackground(): Promise<{ status: string; message: string }> {
+  return fetchAPI('/sync/nas', { method: 'POST' });
 }

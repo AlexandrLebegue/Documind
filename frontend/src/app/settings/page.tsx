@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { getSettings, updateSettings, checkForUpdate, applyUpdate } from '@/lib/api';
-import type { Settings, UpdateCheckResult } from '@/lib/api';
+import { getSettings, updateSettings, checkForUpdate, applyUpdate, triggerNasSync } from '@/lib/api';
+import type { Settings, UpdateCheckResult, NasSyncResult } from '@/lib/api';
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -28,6 +28,20 @@ export default function SettingsPage() {
   const [showApiKey, setShowApiKey] = useState(false);
   const [apiKeyChanged, setApiKeyChanged] = useState(false);
 
+  // NAS sync state
+  const [nasEnabled, setNasEnabled] = useState(false);
+  const [nasHost, setNasHost] = useState('192.168.1.100');
+  const [nasShare, setNasShare] = useState('NAS_Commun_Vol2');
+  const [nasPath, setNasPath] = useState('DOCUMIND/originals');
+  const [nasUsername, setNasUsername] = useState('');
+  const [nasPassword, setNasPassword] = useState('');
+  const [nasPasswordChanged, setNasPasswordChanged] = useState(false);
+  const [nasSyncHour, setNasSyncHour] = useState(7);
+  const [nasSyncMinute, setNasSyncMinute] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<NasSyncResult | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
   useEffect(() => {
     async function fetchSettings() {
       try {
@@ -39,6 +53,13 @@ export default function SettingsPage() {
         setBaseUrl(data.openrouter_base_url);
         setOllamaBaseUrl(data.ollama_base_url ?? 'http://localhost:11434');
         setOllamaModel(data.ollama_model ?? 'llama3.2');
+        setNasEnabled(data.nas_sync_enabled ?? false);
+        setNasHost(data.nas_host ?? '192.168.1.100');
+        setNasShare(data.nas_share ?? 'NAS_Commun_Vol2');
+        setNasPath(data.nas_path ?? 'DOCUMIND/originals');
+        setNasUsername(data.nas_username ?? '');
+        setNasSyncHour(data.nas_sync_hour ?? 7);
+        setNasSyncMinute(data.nas_sync_minute ?? 0);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Erreur de chargement');
       } finally {
@@ -106,7 +127,7 @@ export default function SettingsPage() {
     setSuccess(false);
 
     try {
-      const payload: Record<string, string> = {};
+      const payload: import('@/lib/api').SettingsUpdate = {};
 
       if (provider !== settings?.ai_provider) {
         payload.ai_provider = provider;
@@ -127,6 +148,17 @@ export default function SettingsPage() {
       if (ollamaModel !== settings?.ollama_model) {
         payload.ollama_model = ollamaModel;
       }
+      // NAS settings — always include to ensure cron stays in sync
+      payload.nas_sync_enabled = nasEnabled;
+      payload.nas_host = nasHost;
+      payload.nas_share = nasShare;
+      payload.nas_path = nasPath;
+      payload.nas_username = nasUsername;
+      payload.nas_sync_hour = nasSyncHour;
+      payload.nas_sync_minute = nasSyncMinute;
+      if (nasPasswordChanged && nasPassword) {
+        payload.nas_password = nasPassword;
+      }
 
       if (Object.keys(payload).length === 0) {
         setSuccess(true);
@@ -141,7 +173,15 @@ export default function SettingsPage() {
       setApiKey(updated.openrouter_api_key);
       setOllamaBaseUrl(updated.ollama_base_url ?? 'http://localhost:11434');
       setOllamaModel(updated.ollama_model ?? 'llama3.2');
+      setNasEnabled(updated.nas_sync_enabled ?? false);
+      setNasHost(updated.nas_host ?? '192.168.1.100');
+      setNasShare(updated.nas_share ?? 'NAS_Commun_Vol2');
+      setNasPath(updated.nas_path ?? 'DOCUMIND/originals');
+      setNasUsername(updated.nas_username ?? '');
+      setNasSyncHour(updated.nas_sync_hour ?? 7);
+      setNasSyncMinute(updated.nas_sync_minute ?? 0);
       setApiKeyChanged(false);
+      setNasPasswordChanged(false);
       setShowApiKey(false);
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
@@ -151,6 +191,21 @@ export default function SettingsPage() {
       setSaving(false);
     }
   };
+
+  const handleNasSyncNow = useCallback(async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    setSyncError(null);
+    try {
+      const result = await triggerNasSync();
+      setSyncResult(result);
+      if (result.error_message) setSyncError(result.error_message);
+    } catch (err) {
+      setSyncError(err instanceof Error ? err.message : 'Erreur de synchronisation');
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -390,6 +445,173 @@ export default function SettingsPage() {
           <p className="text-xs text-[#9ca3af]">
             Chemin du dossier contenant les documents et la base de données. Modifiable uniquement via la variable d&apos;environnement DOCUMIND_DATA_DIR.
           </p>
+        </div>
+      </div>
+
+      {/* NAS Sync Section */}
+      <div className="bg-white border border-beige-300 rounded-xl p-4 sm:p-6 space-y-5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#2E75B6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="6" width="16" height="10" rx="2" />
+              <path d="M6 6V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1" />
+              <path d="M10 10v4M8 12l2 2 2-2" />
+            </svg>
+            <h2 className="text-lg font-semibold text-[#1a1a1a]">Synchronisation NAS</h2>
+          </div>
+          {/* Toggle */}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={nasEnabled}
+            onClick={() => setNasEnabled(!nasEnabled)}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+              nasEnabled ? 'bg-accent' : 'bg-beige-300'
+            }`}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+              nasEnabled ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+          </button>
+        </div>
+
+        <p className="text-xs text-[#9ca3af]">
+          Monte automatiquement le partage réseau (CIFS/SMB) et importe les nouveaux documents dans Documind.
+          Le crontab du serveur est mis à jour dès que vous sauvegardez.
+        </p>
+
+        {/* Sync result */}
+        {syncError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+            {syncError}
+          </div>
+        )}
+        {syncResult && !syncError && (
+          <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-sm text-green-800 space-y-1">
+            <p className="font-medium">Sync terminée</p>
+            <p>Scannés : {syncResult.scanned} · Importés : {syncResult.imported} · Ignorés : {syncResult.skipped} · Erreurs : {syncResult.errors}</p>
+            {syncResult.files_imported.length > 0 && (
+              <p className="text-xs text-green-700">Importés : {syncResult.files_imported.join(', ')}</p>
+            )}
+            {syncResult.files_errors.length > 0 && (
+              <p className="text-xs text-red-600">Erreurs : {syncResult.files_errors.join(', ')}</p>
+            )}
+          </div>
+        )}
+
+        <div className={`space-y-4 transition-opacity ${nasEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+          {/* NAS host + share */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-[#1a1a1a]">Hôte NAS</label>
+              <input
+                type="text"
+                value={nasHost}
+                onChange={(e) => setNasHost(e.target.value)}
+                placeholder="192.168.1.100"
+                className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-[#1a1a1a]">Partage (share)</label>
+              <input
+                type="text"
+                value={nasShare}
+                onChange={(e) => setNasShare(e.target.value)}
+                placeholder="NAS_Commun_Vol2"
+                className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+            </div>
+          </div>
+
+          {/* Path */}
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-[#1a1a1a]">Chemin dans le partage</label>
+            <input
+              type="text"
+              value={nasPath}
+              onChange={(e) => setNasPath(e.target.value)}
+              placeholder="DOCUMIND/originals"
+              className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+            />
+            <p className="text-xs text-[#9ca3af]">
+              Chemin relatif à la racine du partage (ex: <code className="font-mono">DOCUMIND/originals</code>).
+            </p>
+          </div>
+
+          {/* Credentials */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-[#1a1a1a]">Utilisateur NAS</label>
+              <input
+                type="text"
+                value={nasUsername}
+                onChange={(e) => setNasUsername(e.target.value)}
+                placeholder="Alex"
+                className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-sm font-medium text-[#1a1a1a]">Mot de passe NAS</label>
+              <input
+                type="password"
+                value={nasPassword}
+                onChange={(e) => { setNasPassword(e.target.value); setNasPasswordChanged(true); }}
+                onFocus={() => { if (!nasPasswordChanged) setNasPassword(''); }}
+                placeholder="••••••••"
+                className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+            </div>
+          </div>
+
+          {/* Schedule */}
+          <div className="space-y-1.5">
+            <label className="block text-sm font-medium text-[#1a1a1a]">Heure de synchronisation quotidienne</label>
+            <div className="flex items-center gap-2">
+              <select
+                value={nasSyncHour}
+                onChange={(e) => setNasSyncHour(Number(e.target.value))}
+                className="px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              >
+                {Array.from({ length: 24 }, (_, i) => (
+                  <option key={i} value={i}>{String(i).padStart(2, '0')}h</option>
+                ))}
+              </select>
+              <span className="text-sm text-[#6b7280]">:</span>
+              <select
+                value={nasSyncMinute}
+                onChange={(e) => setNasSyncMinute(Number(e.target.value))}
+                className="px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              >
+                {[0, 15, 30, 45].map((m) => (
+                  <option key={m} value={m}>{String(m).padStart(2, '0')}</option>
+                ))}
+              </select>
+              <span className="text-xs text-[#9ca3af] ml-1">
+                Cron : <code className="font-mono">{nasSyncMinute} {nasSyncHour} * * *</code>
+              </span>
+            </div>
+          </div>
+
+          {/* Manual sync button */}
+          <button
+            type="button"
+            onClick={handleNasSyncNow}
+            disabled={syncing}
+            className="flex items-center gap-2 px-4 py-2 bg-beige-100 hover:bg-beige-200 disabled:opacity-50 disabled:cursor-not-allowed text-[#1a1a1a] rounded-lg text-sm font-medium transition-colors border border-beige-300"
+          >
+            {syncing ? (
+              <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+              </svg>
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 10a6 6 0 1 0 6-6" />
+                <path d="M4 4v6h6" />
+              </svg>
+            )}
+            {syncing ? 'Synchronisation…' : 'Synchroniser maintenant'}
+          </button>
         </div>
       </div>
 

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   sendChatMessage,
-  sendAgentMessage,
+  streamAgentMessage,
   getChatHistory,
   getChatSessions,
   createChatSession,
@@ -12,6 +12,53 @@ import {
 } from '@/lib/api';
 import type { ChatMessage as ChatMessageType, ChatSession, ToolCallLog } from '@/lib/api';
 import ChatMessage from '@/components/ChatMessage';
+
+const TOOL_LABELS: Record<string, string> = {
+  recherche_web: 'Recherche web',
+  scraper_page: 'Lecture de page',
+  verifier_liens: 'Vérification de liens',
+  crawler_procedures: 'Crawl de site',
+  creer_procedure: 'Création de procédure',
+};
+
+function toolHint(tool: string, args: Record<string, unknown>): string | undefined {
+  switch (tool) {
+    case 'recherche_web': return args.query as string;
+    case 'scraper_page': return args.url as string;
+    case 'verifier_liens': return `${(args.urls as string[])?.length ?? 0} lien(s)`;
+    case 'crawler_procedures': return args.url_base as string;
+    case 'creer_procedure': return (args.name as string) || (args.description as string);
+    default: return undefined;
+  }
+}
+
+const TOOL_ICONS: Record<string, React.ReactNode> = {
+  recherche_web: (
+    <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="6" cy="6" r="4" /><path d="M10 10L13 13" />
+    </svg>
+  ),
+  scraper_page: (
+    <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 2H8L11 5V12H3V2Z" /><path d="M8 2V5H11" /><path d="M5 7H9" /><path d="M5 9H8" />
+    </svg>
+  ),
+  verifier_liens: (
+    <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5.5 8.5a3.5 3.5 0 0 0 5 0l2-2a3.5 3.5 0 0 0-5-5L6 3" /><path d="M8.5 5.5a3.5 3.5 0 0 0-5 0l-2 2a3.5 3.5 0 0 0 5 5L8 11" />
+    </svg>
+  ),
+  crawler_procedures: (
+    <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7" cy="7" r="5.5" /><path d="M7 1.5C7 1.5 5 4 5 7s2 5.5 2 5.5" /><path d="M7 1.5C7 1.5 9 4 9 7s-2 5.5-2 5.5" /><path d="M1.5 7h11" />
+    </svg>
+  ),
+  creer_procedure: (
+    <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 2V12" /><path d="M2 7H12" />
+    </svg>
+  ),
+};
 
 export default function ChatPage() {
   // Sessions state
@@ -29,6 +76,10 @@ export default function ChatPage() {
 
   // Agent mode
   const [agentMode, setAgentMode] = useState(false);
+
+  // Live tool calls while agent is running
+  const [liveTools, setLiveTools] = useState<{ tool: string; done: boolean; hint?: string }[]>([]);
+  const cancelStreamRef = useRef<(() => void) | null>(null);
 
   // Rename state
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -177,79 +228,108 @@ export default function ChatPage() {
       textareaRef.current.style.height = 'auto';
     }
 
-    try {
-      let replyText: string;
-      let sessionId: string;
-      let sourceDocIds: string[] = [];
-      let toolCallsLog: ToolCallLog[] = [];
+    if (agentMode) {
+      // ── Agent mode: SSE streaming ──────────────────────────────────────
+      setLiveTools([]);
 
-      if (agentMode) {
-        const res = await sendAgentMessage(trimmed, activeSessionId || undefined);
-        replyText = res.reply;
-        sessionId = res.session_id;
-        toolCallsLog = res.tool_calls_log || [];
-      } else {
-        const res = await sendChatMessage(trimmed, activeSessionId || undefined);
-        replyText = res.reply;
-        sessionId = res.session_id;
-        sourceDocIds = res.source_document_ids || [];
-      }
+      const finalize = (sessionId: string, toolCallsLog: ToolCallLog[], replyText: string) => {
+        const assistantMessage: ChatMessageType = {
+          id: `temp-${Date.now()}-reply`,
+          message: replyText,
+          role: 'assistant',
+          tool_calls: toolCallsLog.length > 0 ? toolCallsLog : undefined,
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+        setLiveTools([]);
+        setSending(false);
 
-      const assistantMessage: ChatMessageType = {
-        id: `temp-${Date.now()}-reply`,
-        message: replyText,
-        role: 'assistant',
-        context_doc_ids: sourceDocIds.length > 0 ? sourceDocIds : undefined,
-        tool_calls: toolCallsLog.length > 0 ? toolCallsLog : undefined,
-        created_at: new Date().toISOString(),
+        if (!activeSessionId && sessionId) {
+          setActiveSessionId(sessionId);
+          getChatSessions(100, 0).then((r) => setSessions(r.sessions || [])).catch(() => {
+            setSessions((prev) => [{
+              id: sessionId,
+              title: trimmed.slice(0, 50) + (trimmed.length > 50 ? '…' : ''),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }, ...prev]);
+          });
+        } else {
+          setSessions((prev) =>
+            prev
+              .map((s) => s.id === sessionId ? { ...s, updated_at: new Date().toISOString() } : s)
+              .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
+          );
+        }
       };
 
-      // Alias for the block below that references res.session_id
-      const res = { session_id: sessionId };
-      setMessages((prev) => [...prev, assistantMessage]);
-
-      // If this was a new conversation (no activeSessionId), update state
-      if (!activeSessionId && res.session_id) {
-        setActiveSessionId(res.session_id);
-        // Reload sessions to see the new one
-        try {
-          const sessRes = await getChatSessions(100, 0);
-          setSessions(sessRes.sessions || []);
-        } catch {
-          // Fallback: add the session manually
-          const newSession: ChatSession = {
-            id: res.session_id,
-            title: trimmed.slice(0, 50) + (trimmed.length > 50 ? '…' : ''),
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          };
-          setSessions((prev) => [newSession, ...prev]);
-        }
-      } else {
-        // Update session timestamp in list (move to top)
-        setSessions((prev) => {
-          const updated = prev.map((s) =>
-            s.id === res.session_id
-              ? { ...s, updated_at: new Date().toISOString() }
-              : s,
-          );
-          return updated.sort(
-            (a, b) =>
-              new Date(b.updated_at).getTime() -
-              new Date(a.updated_at).getTime(),
-          );
-        });
-      }
-    } catch (err) {
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Erreur lors de l'envoi du message",
+      const cancel = streamAgentMessage(
+        trimmed,
+        activeSessionId || undefined,
+        (event) => {
+          if (event.type === 'tool_start') {
+            setLiveTools((prev) => [...prev, { tool: event.tool, done: false, hint: toolHint(event.tool, event.args) }]);
+          } else if (event.type === 'tool_done') {
+            setLiveTools((prev) =>
+              prev.map((t, i) =>
+                i === prev.findLastIndex((x) => x.tool === event.tool && !x.done)
+                  ? { ...t, done: true }
+                  : t,
+              ),
+            );
+          } else if (event.type === 'done') {
+            finalize(event.session_id, event.tool_calls_log, event.reply);
+          } else if (event.type === 'error') {
+            setError(event.message);
+            setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+            setInput(trimmed);
+            setLiveTools([]);
+            setSending(false);
+          }
+        },
       );
-      setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
-      setInput(trimmed);
-    } finally {
-      setSending(false);
+      cancelStreamRef.current = cancel;
+
+    } else {
+      // ── RAG mode: regular fetch ────────────────────────────────────────
+      try {
+        const res = await sendChatMessage(trimmed, activeSessionId || undefined);
+        const assistantMessage: ChatMessageType = {
+          id: `temp-${Date.now()}-reply`,
+          message: res.reply,
+          role: 'assistant',
+          context_doc_ids: res.source_document_ids?.length > 0 ? res.source_document_ids : undefined,
+          created_at: new Date().toISOString(),
+        };
+        setMessages((prev) => [...prev, assistantMessage]);
+
+        if (!activeSessionId && res.session_id) {
+          setActiveSessionId(res.session_id);
+          try {
+            const sessRes = await getChatSessions(100, 0);
+            setSessions(sessRes.sessions || []);
+          } catch {
+            setSessions((prev) => [{
+              id: res.session_id,
+              title: trimmed.slice(0, 50) + (trimmed.length > 50 ? '…' : ''),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }, ...prev]);
+          }
+        } else {
+          setSessions((prev) =>
+            prev
+              .map((s) => s.id === res.session_id ? { ...s, updated_at: new Date().toISOString() } : s)
+              .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()),
+          );
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Erreur lors de l'envoi du message");
+        setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
+        setInput(trimmed);
+      } finally {
+        setSending(false);
+      }
     }
   };
 
@@ -565,20 +645,43 @@ export default function ChatPage() {
                       D
                     </div>
                     <div className="px-4 py-3 bg-white border border-beige-300/50 rounded-2xl rounded-bl-md shadow-sm">
-                      <div className="flex gap-1">
-                        <span
-                          className="w-2 h-2 bg-[#6b7280] rounded-full animate-bounce"
-                          style={{ animationDelay: '0ms' }}
-                        />
-                        <span
-                          className="w-2 h-2 bg-[#6b7280] rounded-full animate-bounce"
-                          style={{ animationDelay: '150ms' }}
-                        />
-                        <span
-                          className="w-2 h-2 bg-[#6b7280] rounded-full animate-bounce"
-                          style={{ animationDelay: '300ms' }}
-                        />
-                      </div>
+                      {liveTools.length === 0 ? (
+                        <div className="flex gap-1">
+                          <span className="w-2 h-2 bg-[#6b7280] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                          <span className="w-2 h-2 bg-[#6b7280] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                          <span className="w-2 h-2 bg-[#6b7280] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                        </div>
+                      ) : (
+                        <div className="space-y-2 min-w-[200px] max-w-[300px]">
+                          {liveTools.map((t, i) => (
+                            <div key={i} className="flex items-start gap-2 text-xs">
+                              {/* Status icon */}
+                              <div className="flex-shrink-0 mt-0.5">
+                                {t.done ? (
+                                  <svg className="w-3.5 h-3.5 text-green-500" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M2.5 7L5.5 10L11.5 4" />
+                                  </svg>
+                                ) : (
+                                  <span className="block w-3.5 h-3.5 border-2 border-accent/40 border-t-accent rounded-full animate-spin" />
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                {/* Tool name + icon */}
+                                <div className={`flex items-center gap-1 ${t.done ? 'text-[#6b7280]' : 'text-[#1a1a1a] font-medium'}`}>
+                                  <span className={t.done ? 'text-[#9ca3af]' : 'text-accent'}>
+                                    {TOOL_ICONS[t.tool]}
+                                  </span>
+                                  {TOOL_LABELS[t.tool] ?? t.tool}
+                                </div>
+                                {/* Args hint */}
+                                {t.hint && (
+                                  <p className="text-[#9ca3af] truncate text-[10px] mt-0.5">{t.hint}</p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

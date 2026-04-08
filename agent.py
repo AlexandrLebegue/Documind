@@ -1,15 +1,17 @@
-"""Documind agentic chat loop using OpenRouter tool_use (OpenAI-compatible format)."""
+"""Documind agentic chat loop using tool_use (OpenAI-compatible format)."""
 
 import json
 import logging
-from typing import Optional
+from typing import Optional, Callable, Awaitable
 
 import httpx
 
 import uuid
 
 import config as _cfg
+from llm import _active_model
 from web_tools import recherche_web, scraper_page, crawler_procedures, verifier_liens
+
 
 logger = logging.getLogger(__name__)
 
@@ -115,10 +117,10 @@ AGENT_TOOLS: list[dict] = [
                     "manual_documents": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Liste optionnelle de documents requis déjà connus (ex: ['CNI', 'justificatif de domicile'])",
+                        "description": "Liste des documents requis connus (ex: ['CNI', 'justificatif de domicile'])",
                     },
                 },
-                "required": ["procedure_type", "description"],
+                "required": ["procedure_type", "description", "manual_documents"],
             },
         },
     },
@@ -224,6 +226,8 @@ async def run_agent(
     user_message: str,
     context_procedure: str = "",
     conversation_history: Optional[list[dict]] = None,
+    on_tool_start: Optional[Callable[[str, dict], Awaitable[None]]] = None,
+    on_tool_done: Optional[Callable[[str, dict, str], Awaitable[None]]] = None,
 ) -> tuple[str, list[dict]]:
     """Run the agentic loop and return (final_reply, tool_calls_log).
 
@@ -263,10 +267,11 @@ async def run_agent(
     messages.append({"role": "user", "content": user_message})
 
     tool_calls_log: list[dict] = []
+    model_name = _active_model()
 
     for iteration in range(_MAX_ITERATIONS):
-        payload = {
-            "model": _cfg.OPENROUTER_MODEL,
+        payload: dict = {
+            "model": model_name,
             "messages": [{"role": "system", "content": system_prompt}] + messages,
             "tools": AGENT_TOOLS,
             "tool_choice": "auto",
@@ -278,7 +283,8 @@ async def run_agent(
             response = llm_client.post("/chat/completions", json=payload)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
-            logger.error("OpenRouter API error (iteration %d): %s", iteration, exc)
+            logger.error("LLM API error (iteration %d): %s — body: %s",
+                         iteration, exc, exc.response.text[:500])
             return f"Erreur API ({exc.response.status_code}). Veuillez réessayer.", tool_calls_log
 
         data = response.json()
@@ -307,7 +313,11 @@ async def run_agent(
                     args = {}
 
                 logger.info("Agent tool call: %s(%s)", name, args)
+                if on_tool_start:
+                    await on_tool_start(name, args)
                 result_str = await _execute_tool(name, args, llm_client=llm_client)
+                if on_tool_done:
+                    await on_tool_done(name, args, result_str)
 
                 tool_calls_log.append({
                     "tool": name,
