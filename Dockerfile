@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-ara \
     libgl1 \
     libglib2.0-0 \
+    cifs-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -44,7 +45,7 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 # Copy application code
 COPY main.py config.py database.py models.py pipeline.py \
      ocr.py llm.py embeddings.py search.py prompts.py \
-     agent.py web_tools.py update.py ./
+     agent.py web_tools.py update.py nas_sync.py ./
 
 # Copy pre-built frontend from Stage 1
 COPY --from=frontend-builder /frontend/out ./static/
