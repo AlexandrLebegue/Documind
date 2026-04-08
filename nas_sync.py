@@ -1,14 +1,14 @@
-"""NAS synchronization module — mounts a CIFS/SMB share and imports new documents.
+"""NAS synchronization module - mounts a CIFS/SMB share and imports new documents.
 
 This module is designed to run on the Proxmox CT105 container where Documind lives.
-It mounts \\192.168.1.100\NAS_Commun_Vol2\DOCUMIND\originals via CIFS, then uploads
+It mounts //192.168.1.100/NAS_Commun_Vol2/DOCUMIND/originals via CIFS, then uploads
 any files not already known to Documind through the internal API.
 
 Usage (inside CT105):
     python nas_sync.py          # one-shot sync
     Called internally by POST /api/sync/nas
 
-Crontab (CT105) — added automatically by setup_cron_ct105.sh:
+Crontab (CT105) - added automatically by setup_cron_ct105.sh:
     0 7 * * * curl -s -X POST http://localhost:8000/api/sync/nas >> /var/log/nas_sync.log 2>&1
 """
 
