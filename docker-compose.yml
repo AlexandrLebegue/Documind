@@ -1,6 +1,9 @@
 services:
   documind:
-    build: .
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-unknown}
     container_name: documind
     ports:
       - "8000:8000"

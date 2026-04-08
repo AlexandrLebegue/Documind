@@ -47,6 +47,11 @@ COPY main.py config.py database.py models.py pipeline.py \
      ocr.py llm.py embeddings.py search.py prompts.py \
      agent.py web_tools.py update.py nas_sync.py ./
 
+# Bake the git commit SHA into the image so the in-Docker updater can compare
+# with GitHub. Passed via --build-arg GIT_SHA=$(git rev-parse --short HEAD).
+ARG GIT_SHA=unknown
+RUN echo "$GIT_SHA" > .git_sha
+
 # Copy pre-built frontend from Stage 1
 COPY --from=frontend-builder /frontend/out ./static/
 
