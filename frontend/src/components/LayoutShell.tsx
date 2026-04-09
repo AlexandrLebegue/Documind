@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import Sidebar from './Sidebar';
+import QueueIndicator from './QueueIndicator';
 
 export default function LayoutShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -70,6 +71,7 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
           {children}
         </main>
       </div>
+      <QueueIndicator />
     </>
   );
 }

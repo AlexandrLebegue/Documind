@@ -13,7 +13,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,7 +57,9 @@ from models import (
     RenewalSuggestion, RenewalSuggestionsResponse,
     GapAlert, GapAlertsResponse,
     AgentChatRequest, AgentChatResponse, ToolCallLog,
+    QueueStatusResponse,
 )
+from processing_queue import get_queue
 from pipeline import process_document, reprocess_document
 from search import hybrid_search, load_embeddings_cache, refresh_embeddings_cache
 from llm import init_llm_client, chat_with_context, chat_with_context_multiturn, analyze_procedure, match_document_for_procedure
@@ -177,16 +179,34 @@ def _parse_document(doc_dict: dict) -> DocumentResponse:
 # Background task helpers
 # ---------------------------------------------------------------------------
 
-def _process_and_refresh(doc_id: str, file_path: str, app: FastAPI) -> None:
-    """Background task: process document then refresh embeddings cache."""
-    process_document(doc_id, file_path, app.state.llm, app.state.embedding_model)
-    app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+async def _enqueue_process(doc_id: str, file_path: str, filename: str, app: FastAPI) -> None:
+    """Enqueue a document processing job in the FIFO queue."""
+    import asyncio
+
+    async def _job():
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: process_document(doc_id, file_path, app.state.llm, app.state.embedding_model),
+        )
+        app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+
+    await get_queue().enqueue(label=filename, fn=_job)
 
 
-def _reprocess_and_refresh(doc_id: str, app: FastAPI) -> None:
-    """Background task: reprocess document then refresh embeddings cache."""
-    reprocess_document(doc_id, app.state.llm, app.state.embedding_model)
-    app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+async def _enqueue_reprocess(doc_id: str, filename: str, app: FastAPI) -> None:
+    """Enqueue a document reprocessing job in the FIFO queue."""
+    import asyncio
+
+    async def _job():
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: reprocess_document(doc_id, app.state.llm, app.state.embedding_model),
+        )
+        app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+
+    await get_queue().enqueue(label=f"Retraitement — {filename}", fn=_job)
 
 
 # ---------------------------------------------------------------------------
@@ -242,9 +262,17 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Could not apply cron schedule on startup: %s", exc)
 
+    # 6. Start the single-worker processing queue
+    pq = get_queue()
+    pq.start()
+    logger.info("Processing queue started")
+
     yield
 
+    # Shutdown: stop the queue worker
+
     # Shutdown
+    get_queue().stop()
     if app.state.llm is not None:
         app.state.llm.close()
         logger.info("OpenRouter LLM client closed")
@@ -308,7 +336,6 @@ async def health_check() -> HealthResponse:
     "(OCR → LLM metadata → embedding) is started in the background.",
 )
 async def upload_document(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
 ) -> UploadResponse:
     """Accept a file upload and start background processing."""
@@ -350,15 +377,16 @@ async def upload_document(
             detail="LLM or embedding model not loaded. Cannot process documents.",
         )
 
-    # Schedule background processing
-    background_tasks.add_task(_process_and_refresh, doc_id, file_path, app)
-    logger.info("Background processing scheduled for document %s", doc_id)
+    # Enqueue processing (single-worker FIFO — prevents OOM on bulk uploads)
+    await _enqueue_process(doc_id, file_path, safe_filename, app)
+    pos = get_queue().snapshot()["total_pending"] + get_queue().snapshot()["total_active"]
+    logger.info("Document %s enqueued (queue size ~%d)", doc_id, pos)
 
     return UploadResponse(
         id=doc_id,
         filename=safe_filename,
-        status="processing",
-        message="Document uploaded, processing started",
+        status="queued",
+        message="Document ajouté à la file de traitement",
     )
 
 
@@ -477,7 +505,6 @@ async def delete_doc(doc_id: str) -> JSONResponse:
 )
 async def reprocess_doc(
     doc_id: str,
-    background_tasks: BackgroundTasks,
 ) -> JSONResponse:
     """Trigger reprocessing of an existing document."""
     doc = get_document(doc_id)
@@ -490,10 +517,10 @@ async def reprocess_doc(
             detail="LLM or embedding model not loaded. Cannot reprocess.",
         )
 
-    background_tasks.add_task(_reprocess_and_refresh, doc_id, app)
-    logger.info("Reprocessing scheduled for document %s", doc_id)
+    await _enqueue_reprocess(doc_id, doc["filename"], app)
+    logger.info("Reprocessing queued for document %s", doc_id)
 
-    return JSONResponse(content={"message": "Reprocessing started", "id": doc_id})
+    return JSONResponse(content={"message": "Reprocessing queued", "id": doc_id})
 
 
 # ── File serving ───────────────────────────────────────────────────────────
@@ -1692,18 +1719,23 @@ async def update_apply():
         "in NAS_USERNAME / NAS_PASSWORD environment variables."
     ),
 )
-async def sync_nas(background_tasks: BackgroundTasks) -> JSONResponse:
-    """Trigger a NAS → Documind document sync in the background."""
+async def sync_nas() -> JSONResponse:
+    """Trigger a NAS → Documind document sync via the processing queue."""
+    import asyncio
     from nas_sync import sync_from_nas
 
-    def _run_sync() -> None:
-        summary = sync_from_nas()
+    async def _job():
+        loop = asyncio.get_event_loop()
+        summary = await loop.run_in_executor(None, sync_from_nas)
         logger.info("NAS sync completed: %s", summary)
+        # Upload each discovered file is handled inside sync_from_nas via the API,
+        # but refresh embeddings cache after the sync finishes.
+        app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
 
-    background_tasks.add_task(_run_sync)
+    await get_queue().enqueue(label="Synchronisation NAS", fn=_job)
     return JSONResponse(
         status_code=202,
-        content={"status": "accepted", "message": "NAS sync started in background."},
+        content={"status": "accepted", "message": "NAS sync queued."},
     )
 
 
@@ -1719,7 +1751,25 @@ async def sync_nas_blocking() -> JSONResponse:
 
     loop = asyncio.get_event_loop()
     summary = await loop.run_in_executor(None, sync_from_nas)
+    app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
     return JSONResponse(content=summary)
+
+
+# ---------------------------------------------------------------------------
+# Processing queue status
+# ---------------------------------------------------------------------------
+
+
+@app.get(
+    "/api/queue",
+    response_model=QueueStatusResponse,
+    summary="Processing queue status",
+    description="Returns the current state of the FIFO processing queue: active job, pending jobs, and recent history.",
+)
+async def get_queue_status() -> QueueStatusResponse:
+    """Return a snapshot of the processing queue."""
+    snap = get_queue().snapshot()
+    return QueueStatusResponse(**snap)
 
 
 # ---------------------------------------------------------------------------

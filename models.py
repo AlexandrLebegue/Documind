@@ -312,6 +312,32 @@ class SettingsUpdateRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Processing Queue
+# ---------------------------------------------------------------------------
+
+
+class QueueJobResponse(BaseModel):
+    """A single job in the processing queue."""
+    id: str
+    label: str
+    status: str
+    position: int
+    created_at: float
+    started_at: Optional[float] = None
+    finished_at: Optional[float] = None
+    error: Optional[str] = None
+
+
+class QueueStatusResponse(BaseModel):
+    """Full snapshot of the processing queue."""
+    active: Optional[QueueJobResponse] = None
+    pending: list[QueueJobResponse] = []
+    history: list[QueueJobResponse] = []
+    total_pending: int = 0
+    total_active: int = 0
+
+
+# ---------------------------------------------------------------------------
 # Alerts & Expiry Tracking
 # ---------------------------------------------------------------------------
 

@@ -527,3 +527,30 @@ export async function triggerNasSync(): Promise<NasSyncResult> {
 export async function triggerNasSyncBackground(): Promise<{ status: string; message: string }> {
   return fetchAPI('/sync/nas', { method: 'POST' });
 }
+
+// ---------------------------------------------------------------------------
+// Processing queue
+// ---------------------------------------------------------------------------
+
+export interface QueueJob {
+  id: string;
+  label: string;
+  status: string;
+  position: number;
+  created_at: number;
+  started_at?: number;
+  finished_at?: number;
+  error?: string;
+}
+
+export interface QueueStatus {
+  active?: QueueJob;
+  pending: QueueJob[];
+  history: QueueJob[];
+  total_pending: number;
+  total_active: number;
+}
+
+export async function getQueue(): Promise<QueueStatus> {
+  return fetchAPI('/queue');
+}
