@@ -45,7 +45,7 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 # Copy application code
 COPY main.py config.py database.py models.py pipeline.py \
      ocr.py llm.py embeddings.py search.py prompts.py \
-     agent.py web_tools.py update.py nas_sync.py ./
+     agent.py web_tools.py update.py nas_sync.py processing_queue.py ./
 
 # Bake the git commit SHA into the image so the in-Docker updater can compare
 # with GitHub. Passed via --build-arg GIT_SHA=$(git rev-parse --short HEAD).
