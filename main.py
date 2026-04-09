@@ -70,6 +70,47 @@ from update import check_for_update, apply_update, install_dependencies, restart
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Version helpers
+# ---------------------------------------------------------------------------
+
+def _app_version() -> str:
+    """Return the current app version: git SHA in Docker, git describe locally."""
+    sha_file = Path(__file__).parent / ".git_sha"
+    if sha_file.exists():
+        return sha_file.read_text().strip()[:8]
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, cwd=Path(__file__).parent,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
+_VERSION = _app_version()
+
+
+# ---------------------------------------------------------------------------
+# In-memory log buffer (captured from root logger)
+# ---------------------------------------------------------------------------
+
+import collections
+import threading
+
+_LOG_BUFFER: collections.deque[str] = collections.deque(maxlen=2000)
+_LOG_LOCK = threading.Lock()
+
+
+class _BufferHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        line = self.format(record)
+        with _LOG_LOCK:
+            _LOG_BUFFER.append(line)
+
+# ---------------------------------------------------------------------------
 # Frontend build helper
 # ---------------------------------------------------------------------------
 
@@ -228,6 +269,10 @@ async def lifespan(app: FastAPI):
         level=logging.INFO,
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
+    # Attach in-memory log buffer (feeds /api/logs SSE)
+    _buf_handler = _BufferHandler()
+    _buf_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s"))
+    logging.getLogger().addHandler(_buf_handler)
     logger.info("DocuMind starting up...")
 
     # 1. Initialize database
@@ -320,6 +365,7 @@ async def health_check() -> HealthResponse:
         llm_loaded=app.state.llm is not None,
         embedding_model_loaded=app.state.embedding_model is not None,
         total_documents=stats["total_documents"],
+        version=_VERSION,
     )
 
 
@@ -1545,6 +1591,7 @@ async def get_settings():
     """Return current settings. The API key is masked for security."""
     saved = load_settings()
     return SettingsResponse(
+        version=_VERSION,
         ai_provider=_config_module.AI_PROVIDER,
         openrouter_api_key=_mask_api_key(_config_module.OPENROUTER_API_KEY),
         openrouter_model=_config_module.OPENROUTER_MODEL,
@@ -1642,6 +1689,7 @@ async def update_settings(body: SettingsUpdateRequest):
         logger.info("Cron schedule update: %s", cron_result)
 
     return SettingsResponse(
+        version=_VERSION,
         ai_provider=_config_module.AI_PROVIDER,
         openrouter_api_key=_mask_api_key(_config_module.OPENROUTER_API_KEY),
         openrouter_model=_config_module.OPENROUTER_MODEL,
@@ -1770,6 +1818,49 @@ async def get_queue_status() -> QueueStatusResponse:
     """Return a snapshot of the processing queue."""
     snap = get_queue().snapshot()
     return QueueStatusResponse(**snap)
+
+
+# ---------------------------------------------------------------------------
+# Live log streaming (SSE)
+# ---------------------------------------------------------------------------
+
+
+@app.get(
+    "/api/logs",
+    summary="Stream backend logs",
+    description="Server-Sent Events stream of backend log lines. "
+    "Sends the last 200 buffered lines immediately, then streams new lines as they arrive.",
+)
+async def stream_logs():
+    """SSE endpoint — streams backend log lines to the browser."""
+    import asyncio
+
+    async def _generate():
+        # Send buffered history first
+        with _LOG_LOCK:
+            snapshot = list(_LOG_BUFFER)[-200:]
+        for line in snapshot:
+            yield f"data: {line}\n\n"
+
+        # Then tail new lines
+        last_size = len(_LOG_BUFFER)
+        while True:
+            await asyncio.sleep(0.5)
+            with _LOG_LOCK:
+                current = list(_LOG_BUFFER)
+            if len(current) > last_size:
+                for line in current[last_size:]:
+                    yield f"data: {line}\n\n"
+            last_size = len(current)
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

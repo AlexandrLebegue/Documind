@@ -65,9 +65,11 @@ export interface Health {
   llm_loaded: boolean;
   embedding_model_loaded: boolean;
   total_documents: number;
+  version?: string;
 }
 
 export interface Settings {
+  version?: string;
   ai_provider: string;
   openrouter_api_key: string;
   openrouter_model: string;
@@ -553,4 +555,12 @@ export interface QueueStatus {
 
 export async function getQueue(): Promise<QueueStatus> {
   return fetchAPI('/queue');
+}
+
+// ---------------------------------------------------------------------------
+// Live logs
+// ---------------------------------------------------------------------------
+
+export function createLogsEventSource(): EventSource {
+  return new EventSource(`${API_BASE}/logs`);
 }

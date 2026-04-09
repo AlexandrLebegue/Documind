@@ -165,7 +165,7 @@ _LOCAL_SHA_FILE = REPO_ROOT / ".git_sha"
 _PY_SOURCES = [
     "main.py", "config.py", "database.py", "models.py", "pipeline.py",
     "ocr.py", "llm.py", "embeddings.py", "search.py", "prompts.py",
-    "agent.py", "web_tools.py", "update.py", "nas_sync.py",
+    "agent.py", "web_tools.py", "update.py", "nas_sync.py", "processing_queue.py",
 ]
 
 

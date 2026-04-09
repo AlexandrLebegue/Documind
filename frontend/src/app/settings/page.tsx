@@ -617,12 +617,19 @@ export default function SettingsPage() {
 
       {/* Update Section */}
       <div className="bg-white border border-beige-300 rounded-xl p-4 sm:p-6 space-y-4">
-        <div className="flex items-center gap-2">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#2E75B6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 10a6 6 0 1 0 6-6" />
-            <path d="M4 4v6h6" />
-          </svg>
-          <h2 className="text-lg font-semibold text-[#1a1a1a]">Mises à jour</h2>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#2E75B6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 10a6 6 0 1 0 6-6" />
+              <path d="M4 4v6h6" />
+            </svg>
+            <h2 className="text-lg font-semibold text-[#1a1a1a]">Mises à jour</h2>
+          </div>
+          {settings?.version && settings.version !== 'unknown' && (
+            <span className="text-xs font-mono text-[#6b7280] bg-beige-100 border border-beige-200 px-2 py-1 rounded-md">
+              v{settings.version}
+            </span>
+          )}
         </div>
 
         {/* Error */}

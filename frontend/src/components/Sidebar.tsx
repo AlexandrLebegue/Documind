@@ -145,8 +145,27 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           ))}
         </nav>
 
-        {/* Bottom section: Settings + Upload */}
+        {/* Bottom section: Logs + Settings + Upload */}
         <div className="flex-shrink-0 px-3 pb-5 space-y-2">
+          {/* Logs link */}
+          <Link
+            href="/logs"
+            onClick={onClose}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              isActive('/logs')
+                ? 'bg-accent text-white'
+                : 'text-[#6b7280] hover:text-[#1a1a1a] hover:bg-beige-300/60'
+            }`}
+          >
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="14" height="14" rx="2" />
+              <path d="M6 7H14" />
+              <path d="M6 10H14" />
+              <path d="M6 13H10" />
+            </svg>
+            Logs
+          </Link>
+
           {/* Settings link */}
           <Link
             href="/settings"

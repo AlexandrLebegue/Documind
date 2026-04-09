@@ -168,6 +168,7 @@ class HealthResponse(BaseModel):
     llm_loaded: bool
     embedding_model_loaded: bool
     total_documents: int
+    version: str = "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +261,7 @@ class ProcedureExecutionResponse(BaseModel):
 class SettingsResponse(BaseModel):
     """Current application settings (API key is masked)."""
 
+    version: str = "unknown"
     ai_provider: str = Field(..., description="Active AI provider: openrouter | ollama | custom")
     openrouter_api_key: str = Field(
         ..., description="Masked API key (only last 4 characters visible)"
