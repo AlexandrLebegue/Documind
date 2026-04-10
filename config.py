@@ -83,7 +83,7 @@ LLAMACPP_MODEL = _saved.get(
     os.environ.get("LLAMACPP_MODEL", "local"),
 )
 LLM_TEMPERATURE = 0.1
-LLM_MAX_TOKENS = 2048
+LLM_MAX_TOKENS = 8192
 
 # Embedding settings
 EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
