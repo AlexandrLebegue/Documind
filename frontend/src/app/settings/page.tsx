@@ -290,7 +290,7 @@ export default function SettingsPage() {
             {[
               { value: 'openrouter', label: 'OpenRouter', desc: 'API cloud (Gemini, Claude…)' },
               { value: 'ollama', label: 'Ollama', desc: 'Proxmox / local' },
-              { value: 'llamacpp', label: 'llama.cpp', desc: 'VM wm-ai-llm (GTX 1060)' },
+              { value: 'llamacpp', label: 'llama.cpp', desc: 'Serveur local GPU' },
               { value: 'custom', label: 'Personnalisé', desc: 'Endpoint OpenAI-compatible' },
             ].map((p) => (
               <button
