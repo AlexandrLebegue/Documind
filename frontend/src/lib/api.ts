@@ -76,6 +76,8 @@ export interface Settings {
   openrouter_base_url: string;
   ollama_base_url: string;
   ollama_model: string;
+  llamacpp_base_url: string;
+  llamacpp_model: string;
   data_dir: string;
   nas_sync_enabled: boolean;
   nas_host: string;
@@ -93,6 +95,8 @@ export interface SettingsUpdate {
   openrouter_base_url?: string;
   ollama_base_url?: string;
   ollama_model?: string;
+  llamacpp_base_url?: string;
+  llamacpp_model?: string;
   nas_sync_enabled?: boolean;
   nas_host?: string;
   nas_share?: string;
@@ -528,6 +532,10 @@ export async function triggerNasSync(): Promise<NasSyncResult> {
 
 export async function triggerNasSyncBackground(): Promise<{ status: string; message: string }> {
   return fetchAPI('/sync/nas', { method: 'POST' });
+}
+
+export async function testLlamaCppConnection(): Promise<{ status: string; detail?: unknown }> {
+  return fetchAPI('/llamacpp/test', { method: 'POST' });
 }
 
 // ---------------------------------------------------------------------------

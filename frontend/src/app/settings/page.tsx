@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { getSettings, updateSettings, checkForUpdate, applyUpdate, triggerNasSync } from '@/lib/api';
+import { getSettings, updateSettings, checkForUpdate, applyUpdate, triggerNasSync, testLlamaCppConnection } from '@/lib/api';
 import type { Settings, UpdateCheckResult, NasSyncResult } from '@/lib/api';
 
 export default function SettingsPage() {
@@ -25,6 +25,11 @@ export default function SettingsPage() {
   const [baseUrl, setBaseUrl] = useState('');
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
+  const [llamacppBaseUrl, setLlamacppBaseUrl] = useState('http://192.168.1.50:8080');
+  const [llamacppModel, setLlamacppModel] = useState('local');
+  const [llamacppTesting, setLlamacppTesting] = useState(false);
+  const [llamacppStatus, setLlamacppStatus] = useState<'ok' | 'error' | null>(null);
+  const [llamacppStatusMsg, setLlamacppStatusMsg] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [apiKeyChanged, setApiKeyChanged] = useState(false);
 
@@ -53,6 +58,8 @@ export default function SettingsPage() {
         setBaseUrl(data.openrouter_base_url);
         setOllamaBaseUrl(data.ollama_base_url ?? 'http://localhost:11434');
         setOllamaModel(data.ollama_model ?? 'llama3.2');
+        setLlamacppBaseUrl(data.llamacpp_base_url ?? 'http://192.168.1.50:8080');
+        setLlamacppModel(data.llamacpp_model ?? 'local');
         setNasEnabled(data.nas_sync_enabled ?? false);
         setNasHost(data.nas_host ?? '192.168.1.100');
         setNasShare(data.nas_share ?? 'NAS_Commun_Vol2');
@@ -148,6 +155,12 @@ export default function SettingsPage() {
       if (ollamaModel !== settings?.ollama_model) {
         payload.ollama_model = ollamaModel;
       }
+      if (llamacppBaseUrl !== settings?.llamacpp_base_url) {
+        payload.llamacpp_base_url = llamacppBaseUrl;
+      }
+      if (llamacppModel !== settings?.llamacpp_model) {
+        payload.llamacpp_model = llamacppModel;
+      }
       // NAS settings — always include to ensure cron stays in sync
       payload.nas_sync_enabled = nasEnabled;
       payload.nas_host = nasHost;
@@ -173,6 +186,8 @@ export default function SettingsPage() {
       setApiKey(updated.openrouter_api_key);
       setOllamaBaseUrl(updated.ollama_base_url ?? 'http://localhost:11434');
       setOllamaModel(updated.ollama_model ?? 'llama3.2');
+      setLlamacppBaseUrl(updated.llamacpp_base_url ?? 'http://192.168.1.50:8080');
+      setLlamacppModel(updated.llamacpp_model ?? 'local');
       setNasEnabled(updated.nas_sync_enabled ?? false);
       setNasHost(updated.nas_host ?? '192.168.1.100');
       setNasShare(updated.nas_share ?? 'NAS_Commun_Vol2');
@@ -271,10 +286,11 @@ export default function SettingsPage() {
         {/* Provider selector */}
         <div className="space-y-1.5">
           <label className="block text-sm font-medium text-[#1a1a1a]">Fournisseur IA</label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
               { value: 'openrouter', label: 'OpenRouter', desc: 'API cloud (Gemini, Claude…)' },
               { value: 'ollama', label: 'Ollama', desc: 'Proxmox / local' },
+              { value: 'llamacpp', label: 'llama.cpp', desc: 'VM wm-ai-llm (GTX 1060)' },
               { value: 'custom', label: 'Personnalisé', desc: 'Endpoint OpenAI-compatible' },
             ].map((p) => (
               <button
@@ -329,6 +345,86 @@ export default function SettingsPage() {
               <p className="text-xs text-[#9ca3af]">
                 Nom du modèle tel qu&apos;affiché par <code className="font-mono">ollama list</code> (ex: llama3.2, mistral, gemma3).
               </p>
+            </div>
+          </>
+        )}
+
+        {/* llama.cpp fields */}
+        {provider === 'llamacpp' && (
+          <>
+            <div className="space-y-1.5">
+              <label htmlFor="llamacpp-url" className="block text-sm font-medium text-[#1a1a1a]">
+                URL llama-server
+              </label>
+              <input
+                id="llamacpp-url"
+                type="url"
+                value={llamacppBaseUrl}
+                onChange={(e) => setLlamacppBaseUrl(e.target.value)}
+                placeholder="http://192.168.1.50:8080"
+                className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+              <p className="text-xs text-[#9ca3af]">
+                Adresse du serveur llama.cpp (<code className="font-mono">llama-server --host 0.0.0.0 --port 8080</code>).
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="llamacpp-model" className="block text-sm font-medium text-[#1a1a1a]">
+                Nom du modèle
+              </label>
+              <input
+                id="llamacpp-model"
+                type="text"
+                value={llamacppModel}
+                onChange={(e) => setLlamacppModel(e.target.value)}
+                placeholder="local"
+                className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
+              />
+              <p className="text-xs text-[#9ca3af]">
+                Laisser <code className="font-mono">local</code> si un seul modèle est chargé dans llama-server.
+              </p>
+            </div>
+
+            {/* Test connection button */}
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                disabled={llamacppTesting}
+                onClick={async () => {
+                  setLlamacppTesting(true);
+                  setLlamacppStatus(null);
+                  try {
+                    const r = await testLlamaCppConnection();
+                    if (r.status === 'ok') {
+                      setLlamacppStatus('ok');
+                      setLlamacppStatusMsg('Connexion réussie');
+                    } else {
+                      setLlamacppStatus('error');
+                      setLlamacppStatusMsg(String(r.detail ?? 'Erreur inconnue'));
+                    }
+                  } catch (e) {
+                    setLlamacppStatus('error');
+                    setLlamacppStatusMsg(e instanceof Error ? e.message : 'Erreur de connexion');
+                  } finally {
+                    setLlamacppTesting(false);
+                  }
+                }}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border border-zinc-200 transition-colors disabled:opacity-50"
+              >
+                {llamacppTesting ? (
+                  <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M3 10a7 7 0 1 0 14 0A7 7 0 0 0 3 10Z"/><path d="M10 7v6M7 10h6"/></svg>
+                )}
+                Tester la connexion
+              </button>
+              {llamacppStatus === 'ok' && (
+                <span className="text-sm text-green-600 font-medium">✓ {llamacppStatusMsg}</span>
+              )}
+              {llamacppStatus === 'error' && (
+                <span className="text-sm text-red-600">{llamacppStatusMsg}</span>
+              )}
             </div>
           </>
         )}

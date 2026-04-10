@@ -270,6 +270,8 @@ class SettingsResponse(BaseModel):
     openrouter_base_url: str
     ollama_base_url: str
     ollama_model: str
+    llamacpp_base_url: str = "http://192.168.1.50:8080"
+    llamacpp_model: str = "local"
     data_dir: str
     # NAS sync settings
     nas_sync_enabled: bool = False
@@ -301,6 +303,12 @@ class SettingsUpdateRequest(BaseModel):
     )
     ollama_model: Optional[str] = Field(
         None, description="Ollama model name (e.g. llama3.2, mistral)"
+    )
+    llamacpp_base_url: Optional[str] = Field(
+        None, description="llama.cpp server URL (e.g. http://192.168.1.50:8080)"
+    )
+    llamacpp_model: Optional[str] = Field(
+        None, description="Model name to pass to llama-server (default: 'local')"
     )
     # NAS sync settings
     nas_sync_enabled: Optional[bool] = None

@@ -36,6 +36,8 @@ def _active_model() -> str:
     """Return the model identifier for the currently active provider."""
     if _cfg.AI_PROVIDER == "ollama":
         return _cfg.OLLAMA_MODEL
+    if _cfg.AI_PROVIDER == "llamacpp":
+        return _cfg.LLAMACPP_MODEL
     return _cfg.OPENROUTER_MODEL
 
 
@@ -66,6 +68,21 @@ def init_llm_client() -> httpx.Client:
         logger.info(
             "Ollama LLM client initialised (model=%s, base_url=%s)",
             _cfg.OLLAMA_MODEL,
+            base_url,
+        )
+        return client
+
+    if provider == "llamacpp":
+        # llama-server exposes an OpenAI-compatible endpoint — no auth required
+        base_url = _cfg.LLAMACPP_BASE_URL.rstrip("/") + "/v1"
+        client = httpx.Client(
+            base_url=base_url,
+            headers={"Content-Type": "application/json"},
+            timeout=_API_TIMEOUT,
+        )
+        logger.info(
+            "llama.cpp LLM client initialised (model=%s, base_url=%s)",
+            _cfg.LLAMACPP_MODEL,
             base_url,
         )
         return client

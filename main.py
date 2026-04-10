@@ -1598,6 +1598,8 @@ async def get_settings():
         openrouter_base_url=_config_module.OPENROUTER_BASE_URL,
         ollama_base_url=_config_module.OLLAMA_BASE_URL,
         ollama_model=_config_module.OLLAMA_MODEL,
+        llamacpp_base_url=_config_module.LLAMACPP_BASE_URL,
+        llamacpp_model=_config_module.LLAMACPP_MODEL,
         data_dir=DATA_DIR,
         nas_sync_enabled=saved.get("nas_sync_enabled", False),
         nas_host=saved.get("nas_host", "192.168.1.100"),
@@ -1639,6 +1641,12 @@ async def update_settings(body: SettingsUpdateRequest):
     if body.ollama_model is not None:
         current["ollama_model"] = body.ollama_model
         _config_module.OLLAMA_MODEL = body.ollama_model
+    if body.llamacpp_base_url is not None:
+        current["llamacpp_base_url"] = body.llamacpp_base_url
+        _config_module.LLAMACPP_BASE_URL = body.llamacpp_base_url
+    if body.llamacpp_model is not None:
+        current["llamacpp_model"] = body.llamacpp_model
+        _config_module.LLAMACPP_MODEL = body.llamacpp_model
 
     # NAS sync settings
     nas_changed = False
@@ -1696,6 +1704,8 @@ async def update_settings(body: SettingsUpdateRequest):
         openrouter_base_url=_config_module.OPENROUTER_BASE_URL,
         ollama_base_url=_config_module.OLLAMA_BASE_URL,
         ollama_model=_config_module.OLLAMA_MODEL,
+        llamacpp_base_url=_config_module.LLAMACPP_BASE_URL,
+        llamacpp_model=_config_module.LLAMACPP_MODEL,
         data_dir=DATA_DIR,
         nas_sync_enabled=current.get("nas_sync_enabled", False),
         nas_host=current.get("nas_host", "192.168.1.100"),
@@ -1818,6 +1828,46 @@ async def get_queue_status() -> QueueStatusResponse:
     """Return a snapshot of the processing queue."""
     snap = get_queue().snapshot()
     return QueueStatusResponse(**snap)
+
+
+# ---------------------------------------------------------------------------
+# llama.cpp server connectivity test
+# ---------------------------------------------------------------------------
+
+
+@app.post(
+    "/api/llamacpp/test",
+    summary="Test llama.cpp server connection",
+    description="Sends a minimal request to the configured llama.cpp server and returns connection status.",
+)
+async def test_llamacpp_connection() -> JSONResponse:
+    """Test connectivity to the llama.cpp server."""
+    import asyncio
+    import httpx as _httpx
+
+    base_url = _config_module.LLAMACPP_BASE_URL.rstrip("/")
+    try:
+        loop = asyncio.get_event_loop()
+        def _probe():
+            with _httpx.Client(timeout=5.0) as c:
+                # Try /health endpoint first (llama-server exposes it)
+                try:
+                    r = c.get(f"{base_url}/health")
+                    if r.status_code == 200:
+                        return {"ok": True, "detail": r.json()}
+                except Exception:
+                    pass
+                # Fallback: try /v1/models
+                r = c.get(f"{base_url}/v1/models")
+                r.raise_for_status()
+                return {"ok": True, "detail": r.json()}
+        result = await loop.run_in_executor(None, _probe)
+        return JSONResponse(content={"status": "ok", **result})
+    except Exception as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "detail": str(exc)},
+        )
 
 
 # ---------------------------------------------------------------------------

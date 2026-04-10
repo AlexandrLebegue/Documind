@@ -72,6 +72,16 @@ OLLAMA_MODEL = _saved.get(
     "ollama_model",
     os.environ.get("OLLAMA_MODEL", "qwen3.5:2b"),
 )
+
+# llama.cpp server settings (used when AI_PROVIDER == "llamacpp")
+LLAMACPP_BASE_URL = _saved.get(
+    "llamacpp_base_url",
+    os.environ.get("LLAMACPP_BASE_URL", "http://192.168.1.50:8080"),
+)
+LLAMACPP_MODEL = _saved.get(
+    "llamacpp_model",
+    os.environ.get("LLAMACPP_MODEL", "local"),
+)
 LLM_TEMPERATURE = 0.1
 LLM_MAX_TOKENS = 2048
 
