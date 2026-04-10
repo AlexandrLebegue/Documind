@@ -28,8 +28,8 @@ _MAX_IMAGES = 3
 # Maximum characters per document in RAG context (~500 tokens)
 _MAX_RAG_DOC_CHARS = 2000
 
-# Timeout for OpenRouter API calls (seconds)
-_API_TIMEOUT = 120.0
+# Timeout for LLM API calls (seconds) — increase for slow local models
+_API_TIMEOUT = 600.0
 
 
 def _active_model() -> str:
