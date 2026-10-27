@@ -45,4 +45,4 @@
 - [x] G. README / `.env.example` / installeurs Proxmox locaux (sans clé API)
 - [x] H. Classification canonique + dédoublonnage + alertes + titres utiles (commit `9f9c26d`)
 - [x] I. UI mobile : navigation, chat, procédures, logs, aperçu document, cibles tactiles 44 px (commit `7493a68`)
-- [ ] J. Contrôle visuel desktop final et clôture du brief UI
+- [x] J. Contrôle visuel desktop final et clôture du brief UI
