@@ -71,6 +71,7 @@ jobs:
       - name: Stage agent sidecar (Linux)
         if: matrix.platform == 'ubuntu-22.04'
         run: |
+          mkdir -p desktop/src-tauri/binaries
           cp desktop/target/release/documind-agent \
              desktop/src-tauri/binaries/documind-agent-${{ matrix.target }}
 
@@ -78,6 +79,7 @@ jobs:
         if: matrix.platform == 'windows-latest'
         shell: bash
         run: |
+          mkdir -p desktop/src-tauri/binaries
           cp desktop/target/release/documind-agent.exe \
              desktop/src-tauri/binaries/documind-agent-${{ matrix.target }}.exe
 
