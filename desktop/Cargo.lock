@@ -994,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "documind-agent"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "clap",
@@ -1003,6 +1003,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "wait-timeout",
  "walkdir",
  "windows-service",
@@ -1010,7 +1011,7 @@ dependencies = [
 
 [[package]]
 name = "documind-desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dirs 5.0.1",
  "rfd",
@@ -1020,6 +1021,7 @@ dependencies = [
  "tauri-build",
  "tempfile",
  "tokio",
+ "windows-service",
 ]
 
 [[package]]

@@ -34,6 +34,8 @@ impl Default for AgentConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct Counters {
+    seen: u64,
+    errors: u64,
     sent: u64,
     accepted: u64,
     rejected: u64,
@@ -45,6 +47,8 @@ struct Counters {
 struct AgentStatusFile {
     running: bool,
     last_run: Option<String>,
+    next_run: Option<String>,
+    phase: String,
     counters: Counters,
     last_error: Option<String>,
 }
@@ -62,6 +66,11 @@ struct AgentStatus {
     counters: Counters,
     last_error: Option<String>,
     config_path: String,
+    next_run: Option<String>,
+    phase: String,
+    logs: Vec<String>,
+    service_error: Option<String>,
+    config_applied: bool,
 }
 
 fn app_config_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -274,16 +283,40 @@ fn service_installed() -> Result<bool, String> {
     }
 }
 
-fn read_agent_status() -> AgentStatusFile {
-    let path = agent_status_path();
-    if !path.exists() {
-        return AgentStatusFile::default();
+fn service_running() -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        use windows_service::service::{ServiceAccess, ServiceState};
+        use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+        let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+            .map_err(|err| format!("SCM : {err}"))?;
+        let service = manager
+            .open_service(AGENT_SERVICE, ServiceAccess::QUERY_STATUS)
+            .map_err(|err| format!("Service : {err}"))?;
+        Ok(service
+            .query_status()
+            .map_err(|err| format!("État service : {err}"))?
+            .current_state
+            == ServiceState::Running)
     }
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<AgentStateFile>(&raw).ok())
-        .map(|state| state.status)
-        .unwrap_or_default()
+    #[cfg(not(windows))]
+    {
+        Ok(wait_command(
+            command("systemctl").args(["--user", "is-active", "documind-agent"]),
+            Duration::from_secs(3),
+        )?
+        .success())
+    }
+}
+
+fn read_status_at(path: &Path) -> Result<AgentStatusFile, String> {
+    match fs::read(path) {
+        Ok(raw) => serde_json::from_slice::<AgentStateFile>(&raw)
+            .map(|state| state.status)
+            .map_err(|err| format!("État {} invalide : {err}", path.display())),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(AgentStatusFile::default()),
+        Err(err) => Err(format!("État {} : {err}", path.display())),
+    }
 }
 
 fn user_config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -328,8 +361,8 @@ async fn agent_get_config(app: tauri::AppHandle) -> Result<AgentConfig, String> 
         let path = user_config_path(&app)?;
         let legacy = service_config_path();
         let mut config = read_config(if path.exists() { &path } else { &legacy })?;
-        if config.server.is_empty() {
-            config.server = read_server(app)?.unwrap_or_default();
+        if let Some(server) = read_server(app)? {
+            config.server = server;
         }
         write_config(&path, &config)?;
         Ok(config)
@@ -341,8 +374,8 @@ async fn agent_get_config(app: tauri::AppHandle) -> Result<AgentConfig, String> 
 async fn agent_set_config(app: tauri::AppHandle, mut config: AgentConfig) -> Result<(), String> {
     blocking(move || {
         let path = user_config_path(&app)?;
-        if config.server.is_empty() {
-            config.server = read_server(app)?.unwrap_or_default();
+        if let Some(server) = read_server(app)? {
+            config.server = server;
         }
         write_config(&path, &config)
     })
@@ -352,14 +385,67 @@ async fn agent_set_config(app: tauri::AppHandle, mut config: AgentConfig) -> Res
 #[tauri::command]
 async fn agent_status(app: tauri::AppHandle) -> Result<AgentStatus, String> {
     blocking(move || {
-        let state = read_agent_status();
+        let service = read_status_at(&agent_status_path());
+        let manual_dir = app_config_dir(&app)?.join("manual-sync");
+        let manual = read_status_at(&manual_dir.join("state.json"));
+        let installed_result = service_installed();
+        let installed = installed_result.as_ref().copied().unwrap_or(false);
+        let running_result = if installed {
+            service_running()
+        } else {
+            Ok(false)
+        };
+        let service_error = installed_result
+            .err()
+            .or_else(|| running_result.as_ref().err().cloned())
+            .or_else(|| service.as_ref().err().cloned());
+        let service = service.unwrap_or_default();
+        let manual = manual?;
+        let use_manual = manual.running || manual.last_run > service.last_run;
+        let state = if use_manual { &manual } else { &service };
+        let dir = if use_manual {
+            manual_dir
+        } else {
+            service_config_path().parent().unwrap().to_path_buf()
+        };
+        let logs = match fs::read_to_string(dir.join("logs").join("agent.log")) {
+            Ok(raw) => raw
+                .lines()
+                .rev()
+                .take(50)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .map(str::to_string)
+                .collect(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(err) => vec![format!("Lecture journal impossible : {err}")],
+        };
+        let user_path = user_config_path(&app)?;
+        let config_applied = fs::read(&user_path)
+            .ok()
+            .zip(fs::read(service_config_path()).ok())
+            .map(|(user, service)| {
+                serde_json::from_slice::<serde_json::Value>(&user).ok()
+                    == serde_json::from_slice::<serde_json::Value>(&service).ok()
+            })
+            .unwrap_or(false);
         Ok(AgentStatus {
-            installed: service_installed()?,
-            running: state.running,
-            last_run: state.last_run,
-            counters: state.counters,
-            last_error: state.last_error,
-            config_path: user_config_path(&app)?.to_string_lossy().to_string(),
+            installed,
+            running: running_result.unwrap_or(false),
+            last_run: state.last_run.clone(),
+            counters: state.counters.clone(),
+            last_error: state.last_error.clone(),
+            config_path: user_path.to_string_lossy().to_string(),
+            next_run: if installed {
+                service.next_run.clone()
+            } else {
+                None
+            },
+            phase: state.phase.clone(),
+            logs,
+            service_error,
+            config_applied,
         })
     })
     .await
@@ -378,6 +464,60 @@ async fn agent_install(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn agent_sync_now(app: tauri::AppHandle) -> Result<(), String> {
+    // A dedicated state directory avoids collisions with the LocalSystem service.
+    tokio::task::spawn_blocking(move || {
+        static SYNC_RUNNING: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
+        if SYNC_RUNNING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Err("Une synchronisation manuelle est déjà en cours".into());
+        }
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                SYNC_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        let _reset = Reset;
+        let config = user_config_path(&app)?;
+        let data_dir = app_config_dir(&app)?.join("manual-sync");
+        fs::create_dir_all(&data_dir).map_err(|err| err.to_string())?;
+        let error_file =
+            fs::File::create(data_dir.join("process-error.log")).map_err(|err| err.to_string())?;
+        let binary = agent_binary_path()?;
+        let status = wait_command(
+            command(binary)
+                .args(["once", "--from"])
+                .arg(config)
+                .arg("--data-dir")
+                .arg(&data_dir)
+                .stderr(Stdio::from(error_file)),
+            Duration::from_secs(24 * 60 * 60),
+        );
+        match status {
+            Ok(status) if status.success() => Ok(()),
+            other => {
+                let detail =
+                    fs::read_to_string(data_dir.join("process-error.log")).unwrap_or_default();
+                Err(format!(
+                    "Synchronisation échouée ({other:?}) : {}",
+                    detail
+                        .chars()
+                        .rev()
+                        .take(2000)
+                        .collect::<String>()
+                        .chars()
+                        .rev()
+                        .collect::<String>()
+                ))
+            }
+        }
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
 async fn agent_uninstall() -> Result<(), String> {
     blocking(|| run_agent(&["uninstall"], cfg!(windows))).await
 }
@@ -393,7 +533,8 @@ pub fn run() {
             agent_set_config,
             agent_status,
             agent_install,
-            agent_uninstall
+            agent_uninstall,
+            agent_sync_now
         ])
         .run(tauri::generate_context!())
         .expect("error while running DocuMind desktop");

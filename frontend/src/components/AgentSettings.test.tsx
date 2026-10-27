@@ -38,3 +38,30 @@ it('keeps the selected folder visible and reports persistence failure', async ()
   await waitFor(() => expect(toast).toHaveBeenCalledWith('Accès refusé', 'error'));
   expect(screen.getByText('\\\\nas\\Équipe partagée\\Archives')).toBeTruthy();
 });
+it('runs manually without a service and displays progress and the result', async () => {
+  let finish!: () => void;
+  const original = invoke.getMockImplementation()!;
+  invoke.mockImplementation((cmd, args) => {
+    if (cmd === 'agent_sync_now') return new Promise<void>((resolve) => { finish = resolve; });
+    if (cmd === 'agent_status') return Promise.resolve({ installed: false, running: false, phase: 'Analyse des dossiers', counters: { seen: 3, sent: 1, accepted: 1, rejected: 0, ignored: 2, errors: 0 }, logs: ['Agent démarré', 'Résultat : 1 envoi'] });
+    return original(cmd, args);
+  });
+  render(<AgentSettings />);
+  await screen.findByText("Aucun dossier pour l'instant.");
+  fireEvent.click(screen.getByText('Synchroniser maintenant'));
+  await screen.findByRole('progressbar');
+  await waitFor(() => expect(invoke).toHaveBeenCalledWith('agent_sync_now', undefined));
+  expect(invoke.mock.calls.some(([cmd]) => cmd === 'agent_install')).toBe(false);
+  expect(screen.getByText(/Agent démarré/)).toBeTruthy();
+  await act(async () => finish());
+  await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.stringContaining('3 vus'), 'success'));
+  expect(screen.queryByRole('progressbar')).toBeNull();
+});
+it('reports a manual network error in a toast', async () => {
+  const original = invoke.getMockImplementation()!;
+  invoke.mockImplementation((cmd, args) => cmd === 'agent_sync_now' ? Promise.reject('Serveur inaccessible : connexion refusée') : original(cmd, args));
+  render(<AgentSettings />);
+  await screen.findByText("Aucun dossier pour l'instant.");
+  fireEvent.click(screen.getByText('Synchroniser maintenant'));
+  await waitFor(() => expect(toast).toHaveBeenCalledWith('Serveur inaccessible : connexion refusée', 'error'));
+});

@@ -89,6 +89,30 @@ jobs:
       - name: Test desktop and agent before publication
         run: cargo test --workspace --manifest-path desktop/Cargo.toml
 
+      - name: Windows service install, restart and SCM smoke test
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $agent = (Resolve-Path desktop/target/release/documind-agent.exe).Path
+          $config = Join-Path $env:RUNNER_TEMP 'documind-service-test.json'
+          @{ server = 'http://127.0.0.1:8000'; folders = @($env:RUNNER_TEMP); enabled = $false; interval_minutes = 15; machine = 'ci-windows' } | ConvertTo-Json | Set-Content -Encoding utf8NoBOM $config
+          try {
+            & $agent install --from $config
+            if ($LASTEXITCODE -ne 0) { throw 'Service installation failed' }
+            Start-Sleep -Seconds 2
+            if ((Get-Service DocuMindAgent).Status -ne 'Running') { throw 'Service is not running in SCM' }
+            & $agent install --from $config
+            if ($LASTEXITCODE -ne 0) { throw 'Service reapplication/restart failed' }
+            Start-Sleep -Seconds 2
+            if ((Get-Service DocuMindAgent).Status -ne 'Running') { throw 'Service did not restart' }
+            $applied = Get-Content "$env:ProgramData/DocuMind/agent.json" -Raw | ConvertFrom-Json
+            if ($applied.server -ne 'http://127.0.0.1:8000' -or $applied.folders.Count -ne 1) { throw 'Applied config differs' }
+            if (!(Test-Path "$env:ProgramData/DocuMind/logs/agent.log")) { throw 'Agent log missing' }
+          } finally {
+            & $agent uninstall
+          }
+
       - name: Frontend regression tests
         working-directory: frontend
         run: npm test

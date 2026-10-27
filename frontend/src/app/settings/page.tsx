@@ -707,7 +707,7 @@ export default function SettingsPage() {
                 <path d="M4 4v6h6" />
               </svg>
             )}
-            {syncing ? 'Synchronisation…' : 'Synchroniser maintenant'}
+            {syncing ? 'Synchronisation NAS…' : 'Synchroniser le NAS du serveur'}
           </button>
         </div>
       </div>

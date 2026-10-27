@@ -70,7 +70,7 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            server: "http://127.0.0.1:8000".into(),
+            server: String::new(),
             folders: Vec::new(),
             interval_minutes: 60,
             enabled: false,
@@ -95,6 +95,8 @@ struct CacheEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 struct Counters {
+    seen: u64,
+    errors: u64,
     sent: u64,
     accepted: u64,
     rejected: u64,
@@ -106,6 +108,8 @@ struct Counters {
 struct StatusFile {
     running: bool,
     last_run: Option<String>,
+    next_run: Option<String>,
+    phase: String,
     counters: Counters,
     last_error: Option<String>,
 }
@@ -122,6 +126,9 @@ struct AgentState {
 }
 
 fn config_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("DOCUMIND_AGENT_DATA_DIR") {
+        return PathBuf::from(dir);
+    }
     #[cfg(windows)]
     {
         let base = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".into());
@@ -153,18 +160,22 @@ fn hostname() -> String {
         .unwrap_or_else(|_| "pc".into())
 }
 
-fn load_config() -> Config {
-    let mut config: Config = fs::read_to_string(config_path())
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default();
+fn read_config(path: &Path) -> Result<Config, String> {
+    let raw = fs::read(path).map_err(|err| format!("Configuration {} : {err}", path.display()))?;
+    let mut config: Config = serde_json::from_slice(&raw)
+        .map_err(|err| format!("Configuration {} invalide : {err}", path.display()))?;
+    if normalize_server(&config.server).is_empty() {
+        return Err("Adresse serveur vide".into());
+    }
     if config.machine.is_empty() {
         config.machine = hostname();
     }
-    if config.interval_minutes == 0 {
-        config.interval_minutes = 60;
-    }
-    config
+    config.interval_minutes = config.interval_minutes.max(1);
+    Ok(config)
+}
+
+fn load_config() -> Result<Config, String> {
+    read_config(&config_path())
 }
 
 fn save_config(config: &Config) -> Result<(), String> {
@@ -344,13 +355,6 @@ fn normalize_server(value: &str) -> String {
     }
 }
 
-fn http_client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(180))
-        .build()
-        .map_err(|err| err.to_string())
-}
-
 fn check_hashes(
     client: &reqwest::blocking::Client,
     server: &str,
@@ -360,7 +364,7 @@ fn check_hashes(
         .post(format!("{server}/api/ingest/check"))
         .json(&serde_json::json!({ "sha256": hashes }))
         .send()
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| format!("Requête réseau : {err:?}"))?;
     if !response.status().is_success() {
         return Err(format!("check HTTP {}", response.status()));
     }
@@ -385,7 +389,7 @@ fn upload_candidate(
         .post(format!("{server}/api/ingest/candidate"))
         .multipart(form)
         .send()
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| format!("Requête réseau : {err:?}"))?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().unwrap_or_default();
@@ -405,8 +409,8 @@ fn upload_candidate(
 
 fn mark_ignored(state: &mut AgentState, path: &Path, reason: &str) {
     let key = path.to_string_lossy().to_string();
+    state.status.counters.ignored += 1;
     if state.ignored_seen.insert(key) {
-        state.status.counters.ignored += 1;
         log("IGNORE", &format!("{} — {}", path.display(), reason));
     }
 }
@@ -416,12 +420,30 @@ fn scan_once(config: &Config, state: &mut AgentState) -> Result<(), String> {
     if server.is_empty() {
         return Err("adresse serveur vide".into());
     }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .connect_timeout(Duration::from_secs(10))
+        .default_headers({
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                "x-documind-machine",
+                config
+                    .machine
+                    .parse()
+                    .map_err(|err| format!("Nom machine invalide : {err}"))?,
+            );
+            headers
+        })
+        .build()
+        .map_err(|err| err.to_string())?;
+    // An empty check is a lightweight heartbeat, even when every file is filtered.
+    check_hashes(&client, &server, &[])
+        .map_err(|err| format!("Serveur {server}, heartbeat/check impossible : {err}"))?;
     if config.folders.is_empty() {
-        log("INFO", "aucun dossier configuré");
-        return Ok(());
+        return Err("Aucun dossier configuré".into());
     }
-
-    let client = http_client()?;
+    state.status.phase = "Analyse des dossiers".into();
+    save_state(state)?;
 
     // 1. Refresh verdict counters for files already sent.
     if !state.sent.is_empty() {
@@ -441,7 +463,11 @@ fn scan_once(config: &Config, state: &mut AgentState) -> Result<(), String> {
                     state.counted.insert(mark.sha256, mark.verdict);
                 }
             }
-            Err(err) => log("WARN", &format!("check des verdicts impossible: {err}")),
+            Err(err) => {
+                state.status.counters.errors += 1;
+                state.status.last_error = Some(format!("Check des verdicts impossible : {err}"));
+                log("ERROR", state.status.last_error.as_deref().unwrap());
+            }
         }
     }
 
@@ -450,16 +476,29 @@ fn scan_once(config: &Config, state: &mut AgentState) -> Result<(), String> {
     for folder in &config.folders {
         let root = PathBuf::from(folder);
         if !root.exists() {
-            log("WARN", &format!("dossier absent: {}", root.display()));
+            state.status.counters.errors += 1;
+            state.status.last_error = Some(format!("Dossier absent ou inaccessible : {} (service Windows : compte LocalSystem ; lecteurs réseau utilisateur indisponibles)", root.display()));
+            log("ERROR", state.status.last_error.as_deref().unwrap());
             continue;
         }
-        for entry in WalkDir::new(&root)
-            .follow_links(false)
-            .into_iter()
-            .filter_map(|item| item.ok())
-        {
+        for item in WalkDir::new(&root).follow_links(false) {
+            let entry = match item {
+                Ok(entry) => entry,
+                Err(err) => {
+                    state.status.counters.errors += 1;
+                    state.status.last_error = Some(format!("Accès dossier : {err}"));
+                    log("ERROR", state.status.last_error.as_deref().unwrap());
+                    continue;
+                }
+            };
             if !entry.file_type().is_file() {
                 continue;
+            }
+            state.status.counters.seen += 1;
+            if state.status.counters.seen.is_multiple_of(20) {
+                state.status.phase =
+                    format!("Analyse : {} fichiers vus", state.status.counters.seen);
+                save_state(state)?;
             }
             let path = entry.path();
             if is_hidden(path) {
@@ -485,7 +524,14 @@ fn scan_once(config: &Config, state: &mut AgentState) -> Result<(), String> {
             }
             let stat = match file_stat(path) {
                 Some(stat) => stat,
-                None => continue,
+                None => {
+                    state.status.counters.errors += 1;
+                    log(
+                        "ERROR",
+                        &format!("Métadonnées inaccessibles : {}", path.display()),
+                    );
+                    continue;
+                }
             };
             if stat.size < MIN_SIZE || stat.size > MAX_SIZE {
                 mark_ignored(state, path, "taille hors limites");
@@ -493,10 +539,14 @@ fn scan_once(config: &Config, state: &mut AgentState) -> Result<(), String> {
             }
             let key = path.to_string_lossy().to_string();
             if state.stability.get(&key) != Some(&stat) {
-                // First sighting or still being written: wait for the next pass.
-                state.stability.insert(key, stat);
-                mark_ignored(state, path, "taille/mtime instables");
-                continue;
+                // Confirm stability within this run, so the first manual run can send files.
+                std::thread::sleep(Duration::from_millis(250));
+                if file_stat(path) != Some(stat) {
+                    state.stability.insert(key, stat);
+                    mark_ignored(state, path, "taille/mtime instables");
+                    continue;
+                }
+                state.stability.insert(key.clone(), stat);
             }
             if let Err(reason) = check_magic(path, &ext) {
                 mark_ignored(state, path, &reason);
@@ -519,6 +569,7 @@ fn scan_once(config: &Config, state: &mut AgentState) -> Result<(), String> {
                         sha
                     }
                     Err(err) => {
+                        state.status.counters.errors += 1;
                         log(
                             "WARN",
                             &format!("hash impossible {}: {err}", path.display()),
@@ -551,13 +602,19 @@ fn scan_once(config: &Config, state: &mut AgentState) -> Result<(), String> {
 
     // 4. Upload unknown files only.
     for (sha, path) in candidates {
+        state.status.phase = format!(
+            "Envoi : {} envoyés / {} fichiers vus",
+            state.status.counters.sent, state.status.counters.seen
+        );
+        save_state(state)?;
         if !unknown.contains(&sha) {
+            state.status.counters.ignored += 1;
             continue;
         }
         match upload_candidate(&client, &server, &path, &config.machine) {
             Ok(response) => {
+                state.status.counters.sent += 1;
                 if !state.sent.contains_key(&sha) {
-                    state.status.counters.sent += 1;
                     state
                         .sent
                         .insert(sha.clone(), path.to_string_lossy().to_string());
@@ -604,6 +661,55 @@ fn sleep_with_stop(duration: Duration, stop: Option<&AtomicBool>) {
     }
 }
 
+fn run_cycle(config: &Config, state: &mut AgentState, automatic: bool) -> Result<(), String> {
+    state.status.running = true;
+    state.status.last_run = Some(now_iso());
+    state.status.next_run = None;
+    state.status.last_error = None;
+    state.status.counters = Counters::default();
+    state.status.phase = "Connexion au serveur".into();
+    save_state(state)?;
+    log(
+        "INFO",
+        &format!(
+            "Passage : serveur={}, dossiers={}, automatique={automatic}",
+            config.server,
+            config.folders.len()
+        ),
+    );
+    let result = scan_once(config, state);
+    if let Err(err) = &result {
+        state.status.counters.errors += 1;
+        state.status.last_error = Some(err.clone());
+        log("ERROR", err);
+    }
+    if state.status.counters.errors > 0 && state.status.last_error.is_none() {
+        state.status.last_error = Some(format!(
+            "{} erreur(s) pendant le passage ; consulter le journal",
+            state.status.counters.errors
+        ));
+    }
+    state.status.running = false;
+    state.status.phase = if state.status.last_error.is_some() {
+        "Terminé avec erreur"
+    } else {
+        "Terminé"
+    }
+    .into();
+    if automatic && config.enabled {
+        state.status.next_run = Some(
+            (Local::now() + chrono::Duration::minutes(config.interval_minutes as i64)).to_rfc3339(),
+        );
+    }
+    log("INFO", &format!("Résultat : {:?}", state.status.counters));
+    save_state(state)?;
+    result?;
+    if let Some(err) = &state.status.last_error {
+        return Err(err.clone());
+    }
+    Ok(())
+}
+
 fn run_loop(stop: Option<&AtomicBool>) {
     log(
         "INFO",
@@ -617,24 +723,25 @@ fn run_loop(stop: Option<&AtomicBool>) {
         }
         let config = load_config();
         let mut state = load_state();
-        state.status.running = true;
-        if config.enabled {
-            match scan_once(&config, &mut state) {
-                Ok(()) => {
-                    state.status.last_run = Some(now_iso());
-                    state.status.last_error = None;
-                }
-                Err(err) => {
-                    state.status.last_error = Some(err.clone());
-                    log("ERROR", &format!("cycle échoué: {err}"));
-                }
+        let wait_minutes = match config {
+            Ok(config) if config.enabled => {
+                let _ = run_cycle(&config, &mut state, true);
+                config.interval_minutes
             }
-        }
-        let _ = save_state(&state);
-        let wait_minutes = if config.enabled {
-            config.interval_minutes.max(1)
-        } else {
-            1
+            Ok(_) => {
+                state.status.running = false;
+                state.status.next_run = None;
+                state.status.phase = "Synchronisation automatique désactivée".into();
+                let _ = save_state(&state);
+                1
+            }
+            Err(err) => {
+                state.status.last_error = Some(err.clone());
+                state.status.running = false;
+                log("ERROR", &err);
+                let _ = save_state(&state);
+                1
+            }
         };
         sleep_with_stop(Duration::from_secs(wait_minutes * 60), stop);
     }
@@ -672,6 +779,42 @@ fn install_service() -> Result<(), String> {
             if output.status.code() != Some(1073) {
                 return Err(format!("sc create: {}", message.trim()));
             }
+        }
+        let output = system_output(Command::new("sc").args([
+            "config",
+            SERVICE_NAME,
+            "binPath=",
+            &bin_path,
+            "start=",
+            "auto",
+        ]))
+        .map_err(|err| err.to_string())?;
+        if !output.status.success() {
+            return Err(format!(
+                "sc config : {}",
+                String::from_utf8_lossy(&output.stdout)
+            ));
+        }
+        let _ = system_output(Command::new("sc").args(["stop", SERVICE_NAME]));
+        // Query SCM numerically: sc output is localised on French Windows.
+        use windows_service::service::{ServiceAccess, ServiceState};
+        use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
+        let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+            .map_err(|err| format!("SCM : {err}"))?;
+        let service = manager
+            .open_service(SERVICE_NAME, ServiceAccess::QUERY_STATUS)
+            .map_err(|err| format!("Service : {err}"))?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while service
+            .query_status()
+            .map_err(|err| err.to_string())?
+            .current_state
+            != ServiceState::Stopped
+        {
+            if std::time::Instant::now() >= deadline {
+                return Err("Le service ne s’arrête pas ; configuration copiée mais redémarrage non effectué".into());
+            }
+            std::thread::sleep(Duration::from_millis(250));
         }
         let output = system_output(Command::new("sc").args(["start", SERVICE_NAME]))
             .map_err(|err| err.to_string())?;
@@ -720,6 +863,12 @@ fn install_service() -> Result<(), String> {
         .map_err(|err| err.to_string())?;
         if !status.status.success() {
             return Err("systemctl --user enable --now a échoué".into());
+        }
+        let output =
+            system_output(Command::new("systemctl").args(["--user", "restart", "documind-agent"]))
+                .map_err(|err| err.to_string())?;
+        if !output.status.success() {
+            return Err("systemctl --user restart a échoué".into());
         }
         log("INFO", "service systemd --user installé");
     }
@@ -834,6 +983,8 @@ mod winservice {
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+    #[arg(long, global = true)]
+    data_dir: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -841,7 +992,10 @@ enum Commands {
     /// Run the agent in the foreground.
     Run,
     /// Run a single scan and exit.
-    Once,
+    Once {
+        #[arg(long)]
+        from: Option<PathBuf>,
+    },
     /// Install the Windows service / systemd user unit.
     Install {
         #[arg(long)]
@@ -870,26 +1024,20 @@ fn main() {
     }
 
     let cli = Cli::parse();
+    if let Some(dir) = cli.data_dir {
+        std::env::set_var("DOCUMIND_AGENT_DATA_DIR", dir);
+    }
     let result = match cli.command {
         None | Some(Commands::Run) => {
             run_loop(None);
             Ok(())
         }
-        Some(Commands::Once) => {
-            let config = load_config();
+        Some(Commands::Once { from }) => (|| {
+            let config = read_config(&from.unwrap_or_else(config_path))?;
             let mut state = load_state();
-            let result = if config.enabled {
-                scan_once(&config, &mut state)
-            } else {
-                log("INFO", "agent désactivé — scan ignoré");
-                Ok(())
-            };
-            if result.is_ok() {
-                state.status.last_run = Some(now_iso());
-            }
-            let _ = save_state(&state);
-            result
-        }
+            // Manual synchronisation is independent of the automatic enabled switch.
+            run_cycle(&config, &mut state, false)
+        })(),
         Some(Commands::Install { from }) => (|| {
             if let Some(path) = from {
                 let raw = fs::read(path).map_err(|err| err.to_string())?;

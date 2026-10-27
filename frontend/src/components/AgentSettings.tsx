@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getConfiguredServer, isDesktopApp } from '@/lib/api';
 import { toast } from '@/components/Toast';
+import { invoke as call } from '@tauri-apps/api/core';
 
 interface AgentConfig {
   server: string;
@@ -15,7 +16,12 @@ interface AgentStatus {
   installed: boolean;
   running: boolean;
   last_run?: string | null;
-  counters: { sent: number; accepted: number; rejected: number; ignored: number };
+  next_run?: string | null;
+  phase?: string;
+  logs?: string[];
+  service_error?: string | null;
+  config_applied?: boolean;
+  counters: { seen: number; errors: number; sent: number; accepted: number; rejected: number; ignored: number };
   last_error?: string | null;
   config_path?: string;
 }
@@ -28,7 +34,6 @@ const INTERVALS = [
 ];
 
 async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
-  const { invoke: call } = await import('@tauri-apps/api/core');
   return call<T>(command, args);
 }
 
@@ -57,6 +62,7 @@ export default function AgentSettings() {
       const st = await invoke<AgentStatus>('agent_status');
       setStatus(st);
       setError(null);
+      return st;
     } catch (err) {
       setError(String(err));
     } finally {
@@ -74,7 +80,7 @@ export default function AgentSettings() {
       }
     }).catch((err) => { if (!cancelled) { setError(String(err)); toast(String(err), 'error'); } });
     refresh();
-    const timer = setInterval(refresh, 10000);
+    const timer = setInterval(refresh, 1000);
     return () => { cancelled = true; clearInterval(timer); };
   }, [desktop, refresh]);
 
@@ -83,7 +89,7 @@ export default function AgentSettings() {
   const update = (patch: Partial<AgentConfig>) => {
     const current = configRef.current;
     if (!current) return;
-    const next = { ...current, ...patch };
+    const next = { ...current, ...patch, server: getConfiguredServer() || current.server };
     configRef.current = next;
     setConfig(next);
     writes.current = writes.current.catch(() => undefined).then(() => invoke('agent_set_config', { config: next }));
@@ -128,6 +134,24 @@ export default function AgentSettings() {
       }
     } catch (err) {
       toast(String(err), 'error');
+    }
+  };
+
+  const syncNow = async () => {
+    setBusy('sync');
+    try {
+      await writes.current;
+      await invoke('agent_set_config', { config: { ...configRef.current, server: getConfiguredServer() } });
+      await invoke('agent_sync_now');
+      const result = await refresh();
+      const c = result?.counters;
+      toast(c ? `Synchronisation terminée : ${c.seen || 0} vus, ${c.ignored || 0} ignorés, ${c.sent || 0} envoyés, ${c.accepted || 0} acceptés, ${c.rejected || 0} refusés, ${c.errors || 0} erreurs` : 'Synchronisation terminée', 'success');
+    } catch (err) {
+      setError(String(err));
+      toast(String(err), 'error');
+      await refresh();
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -241,6 +265,9 @@ export default function AgentSettings() {
             </div>
 
             <div className="flex flex-wrap gap-2">
+              <button onClick={syncNow} disabled={busy !== null} className="min-h-[44px] rounded-lg bg-accent px-5 text-sm font-medium text-white disabled:opacity-60">
+                {busy === 'sync' ? 'Synchronisation en cours…' : 'Synchroniser maintenant'}
+              </button>
               <button
                 onClick={save}
                 disabled={busy !== null}
@@ -268,20 +295,27 @@ export default function AgentSettings() {
               )}
             </div>
 
+            {busy === 'sync' && <div role="status" aria-live="polite" className="rounded-lg border p-3">
+              <progress aria-label="Synchronisation en cours" className="w-full" />
+              {status?.phase || 'Démarrage de l’agent…'} · {status?.counters.seen || 0} fichiers vus · {status?.counters.sent || 0} envoyés
+            </div>}
             {status && (
               <div className="grid gap-3 rounded-lg border border-beige-300 bg-beige-50 p-4 text-sm sm:grid-cols-2">
                 <p>
                   <span className="text-[#6b7280]">Service :</span>{' '}
                   <span className={status.running ? 'font-medium text-green-700' : 'font-medium text-[#6b7280]'}>
-                    {status.installed ? (status.running ? 'actif' : 'installé, arrêté') : 'non installé'}
+                    {status.service_error ? `erreur : ${status.service_error}` : status.installed ? (status.running ? 'démarré' : 'installé, arrêté') : 'non installé'}
                   </span>
                 </p>
                 <p>
                   <span className="text-[#6b7280]">Dernier passage :</span>{' '}
                   {status.last_run ? new Date(status.last_run).toLocaleString('fr-FR') : '—'}
                 </p>
+                <p>Prochain passage : {status.running && status.next_run ? new Date(status.next_run).toLocaleString('fr-FR') : '—'}</p>
+                <p className="sm:col-span-2">{status.phase || 'Aucun passage enregistré'}</p>
+                {status.config_applied === false && <p className="sm:col-span-2 text-amber-700">Configuration locale différente de celle du service. Cliquez sur Installer / appliquer au service pour activer ces dossiers en automatique. Le lancement manuel utilise vos réglages actuels.</p>}
                 <p className="sm:col-span-2 text-[#6b7280]">
-                  Envoyés <strong className="text-[#1a1a1a]">{status.counters.sent}</strong> ·
+                  Dernier passage : vus <strong>{status.counters.seen || 0}</strong> · erreurs <strong>{status.counters.errors || 0}</strong> · envoyés <strong className="text-[#1a1a1a]">{status.counters.sent}</strong> ·
                   acceptés <strong className="text-green-700">{status.counters.accepted}</strong> ·
                   refusés <strong className="text-red-700">{status.counters.rejected}</strong> ·
                   ignorés <strong className="text-[#1a1a1a]">{status.counters.ignored}</strong>
@@ -289,6 +323,11 @@ export default function AgentSettings() {
                 {status.last_error && (
                   <p className="sm:col-span-2 text-xs text-red-600">Dernière erreur : {status.last_error}</p>
                 )}
+                <div className="sm:col-span-2">
+                  <p className="font-medium">Journal de l’agent — 50 dernières lignes</p>
+                  <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-white p-3 text-xs">{status.logs?.join('\n') || 'Aucune ligne de journal disponible.'}</pre>
+                </div>
+                <p className="sm:col-span-2 text-xs text-[#6b7280]">Le service Windows utilise LocalSystem : les lecteurs réseau de votre session peuvent être inaccessibles. Le lancement manuel utilise votre compte.</p>
                 {status.config_path && (
                   <p className="sm:col-span-2 break-all text-xs text-[#9ca3af]">Config : {status.config_path}</p>
                 )}
