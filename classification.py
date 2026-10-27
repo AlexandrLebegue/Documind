@@ -345,6 +345,8 @@ _FAILED_TITLE_WORDS = (
     "document administratif non identifie",
     "document non reconnu",
     "non identifie",
+    "non identifiable",
+    "facture ocr",
     "inconnu",
     "document administratif ocr",
 )
@@ -569,7 +571,15 @@ def build_title(
     """Return a useful title: type + issuer + date, filename fallback."""
     current = str(metadata.get("titre") or "").strip()
     doc_type = metadata.get("type") or "autre"
-    if current and not is_generic_title(current):
+    label_fold = _norm(TYPE_LABELS.get(doc_type, TYPE_LABELS["autre"]))
+    useless = {"inconnu", "non identifie", "non identifiable", "sans emetteur", "banque"}
+    current_fold = _norm(current)
+    weak_current = current_fold == label_fold
+    if current_fold.startswith(label_fold + " "):
+        rest = current_fold[len(label_fold):].strip()
+        if rest in _GENERIC_TITLES or rest in useless or rest.startswith(label_fold):
+            weak_current = True
+    if current and not is_generic_title(current) and not weak_current:
         current_type, _ = _best_match(_norm(current), prefer_first=True)
         if not current_type or current_type == doc_type:
             return current
@@ -581,10 +591,18 @@ def build_title(
 
     label = TYPE_LABELS.get(doc_type, TYPE_LABELS["autre"])
     emetteur = str(metadata.get("emetteur") or "").strip()
+    useful_emetteur = (
+        bool(emetteur)
+        and _norm(emetteur) not in _GENERIC_TITLES
+        and _norm(emetteur) not in {
+            "inconnu", "non identifie", "non identifiable",
+            "sans emetteur", "banque",
+        }
+    )
     date = str(metadata.get("date") or "").strip()
     date_part = date[:7] if re.match(r"^\d{4}-\d{2}", date) else date
     parts = [label]
-    if emetteur and _norm(emetteur) not in _norm(label):
+    if useful_emetteur and _norm(emetteur) not in _norm(label):
         parts.append(emetteur)
     if date_part:
         parts.append(date_part)
