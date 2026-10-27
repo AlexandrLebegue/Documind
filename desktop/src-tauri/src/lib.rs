@@ -398,7 +398,13 @@ async fn agent_status(app: tauri::AppHandle) -> Result<AgentStatus, String> {
         let service_error = installed_result
             .err()
             .or_else(|| running_result.as_ref().err().cloned())
-            .or_else(|| service.as_ref().err().cloned());
+            .or_else(|| service.as_ref().err().cloned())
+            .or_else(|| {
+                service
+                    .as_ref()
+                    .ok()
+                    .and_then(|state| state.last_error.clone())
+            });
         let service = service.unwrap_or_default();
         let manual = manual?;
         let use_manual = manual.running || manual.last_run > service.last_run;
@@ -464,7 +470,7 @@ async fn agent_install(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn agent_sync_now(app: tauri::AppHandle) -> Result<(), String> {
+async fn agent_sync_now(app: tauri::AppHandle) -> Result<AgentStatusFile, String> {
     // A dedicated state directory avoids collisions with the LocalSystem service.
     tokio::task::spawn_blocking(move || {
         static SYNC_RUNNING: std::sync::atomic::AtomicBool =
@@ -495,7 +501,7 @@ async fn agent_sync_now(app: tauri::AppHandle) -> Result<(), String> {
             Duration::from_secs(24 * 60 * 60),
         );
         match status {
-            Ok(status) if status.success() => Ok(()),
+            Ok(status) if status.success() => read_status_at(&data_dir.join("state.json")),
             other => {
                 let detail =
                     fs::read_to_string(data_dir.join("process-error.log")).unwrap_or_default();

@@ -142,9 +142,9 @@ export default function AgentSettings() {
     try {
       await writes.current;
       await invoke('agent_set_config', { config: { ...configRef.current, server: getConfiguredServer() } });
-      await invoke('agent_sync_now');
-      const result = await refresh();
-      const c = result?.counters;
+      const result = await invoke<Pick<AgentStatus, 'counters'>>('agent_sync_now');
+      await refresh();
+      const c = result.counters;
       toast(c ? `Synchronisation terminée : ${c.seen || 0} vus, ${c.ignored || 0} ignorés, ${c.sent || 0} envoyés, ${c.accepted || 0} acceptés, ${c.rejected || 0} refusés, ${c.errors || 0} erreurs` : 'Synchronisation terminée', 'success');
     } catch (err) {
       setError(String(err));

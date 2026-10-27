@@ -42,7 +42,7 @@ it('runs manually without a service and displays progress and the result', async
   let finish!: () => void;
   const original = invoke.getMockImplementation()!;
   invoke.mockImplementation((cmd, args) => {
-    if (cmd === 'agent_sync_now') return new Promise<void>((resolve) => { finish = resolve; });
+    if (cmd === 'agent_sync_now') return new Promise((resolve) => { finish = () => resolve({ counters: { seen: 3, sent: 1, accepted: 1, rejected: 0, ignored: 2, errors: 0 } }); });
     if (cmd === 'agent_status') return Promise.resolve({ installed: false, running: false, phase: 'Analyse des dossiers', counters: { seen: 3, sent: 1, accepted: 1, rejected: 0, ignored: 2, errors: 0 }, logs: ['Agent démarré', 'Résultat : 1 envoi'] });
     return original(cmd, args);
   });
