@@ -33,6 +33,10 @@
 - Dédoublonnage SHA-256 : 90 → 62 documents (28 doublons supprimés), second passage : 0 doublon.
 - Retraitement complet (racines + enfants) : 62 documents, 0 erreur ; `autre` = 0, expirés = 0, échéances < 30 j = 0, 63 documents au total.
 - UI mobile vérifiée en 360 et 390 px : aucun débordement horizontal, titre du document avant l'aperçu, boutons principaux ≥ 44 px.
+- Chat : ordre chronologique rétabli (question puis réponse), vérifié sur 3 échanges ; sources toujours affichées par titre, jamais par identifiant brut.
+- Classification DGFiP : questionnaires d'activité professionnelle classés `administratif` (2 documents retraités).
+- Doublons questionnaires : vérifiés comme pages différentes (1 page vs 2 pages, contenus OCR distincts, ratio 0,65), aucun dédoublonnage.
+- Documents mobile : filtres type/tri + bascule grille/liste sur une seule ligne à 390 px.
 
 ## TODO
 - [x] A. Profiling + optimisations mesurées
