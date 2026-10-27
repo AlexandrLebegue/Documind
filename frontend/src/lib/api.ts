@@ -40,12 +40,19 @@ export interface ToolCallLog {
   result_preview: string;
 }
 
+export interface SourceDocument {
+  id: string;
+  title: string;
+  filename?: string;
+}
+
 export interface ChatMessage {
   id: string;
   session_id?: string;
   message: string;
   role: string;
   context_doc_ids?: string[];
+  context_docs?: SourceDocument[];
   tool_calls?: ToolCallLog[];
   created_at: string;
 }
@@ -273,7 +280,7 @@ export async function deleteChatSession(id: string): Promise<void> {
 export async function sendChatMessage(
   message: string,
   sessionId?: string,
-): Promise<{ reply: string; source_document_ids: string[]; session_id: string }> {
+): Promise<{ reply: string; source_document_ids: string[]; source_documents: SourceDocument[]; session_id: string }> {
   return fetchAPI('/chat', {
     method: 'POST',
     body: JSON.stringify({ message, session_id: sessionId || null }),

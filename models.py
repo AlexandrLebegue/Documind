@@ -93,6 +93,14 @@ class ChatRequest(BaseModel):
     )
 
 
+class SourceDocument(BaseModel):
+    """A source document referenced by a chat reply."""
+
+    id: str
+    title: str
+    filename: Optional[str] = None
+
+
 class ChatMessage(BaseModel):
     """A single chat history entry."""
 
@@ -101,6 +109,7 @@ class ChatMessage(BaseModel):
     message: str
     role: str
     context_doc_ids: Optional[list[str]] = None
+    context_docs: Optional[list[SourceDocument]] = None
     created_at: str
 
 
@@ -109,6 +118,7 @@ class ChatResponse(BaseModel):
 
     reply: str
     source_document_ids: list[str]
+    source_documents: list[SourceDocument] = []
     session_id: str
 
 

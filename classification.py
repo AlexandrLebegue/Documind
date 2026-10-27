@@ -285,6 +285,13 @@ _KEYWORD_RULES: list[tuple[str, list[str]]] = [
         r"\bimmigration\b",
         r"\bprefecture\b",
         r"\bmairie\b",
+        r"\bquestionnaire d activite professionnelle\b",
+        r"\bquestionnaire professionnel\b",
+        r"\bquestionnaire professionnelle\b",
+        r"\bdirection generale des finances publiques\b",
+        r"\bdgfip\b",
+        r"\bservice des impots aux entreprises\b",
+        r"\bimpots gouv\b",
     ]),
     ("contrat", [
         r"\bcontrat\b",

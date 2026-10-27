@@ -116,7 +116,8 @@ export default function ChatPage() {
     setError(null);
     try {
       const res = await getChatHistory(sessionId, 100, 0);
-      setMessages(res.messages || []);
+      // API returns newest first; the conversation must read chronologically.
+      setMessages((res.messages || []).slice().reverse());
     } catch (err) {
       console.error('Failed to load chat history:', err);
       setMessages([]);
@@ -312,6 +313,7 @@ export default function ChatPage() {
           message: res.reply,
           role: 'assistant',
           context_doc_ids: res.source_document_ids?.length > 0 ? res.source_document_ids : undefined,
+          context_docs: res.source_documents?.length > 0 ? res.source_documents : undefined,
           created_at: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, assistantMessage]);

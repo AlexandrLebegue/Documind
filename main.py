@@ -52,7 +52,7 @@ from database import (
 from models import (
     DocumentResponse, DocumentListResponse, DocumentUpdateRequest,
     SearchRequest, SearchResponse, SearchResultItem,
-    ChatRequest, ChatResponse, ChatHistoryResponse,
+    ChatRequest, ChatResponse, ChatHistoryResponse, SourceDocument,
     ChatSessionResponse, ChatSessionListResponse,
     ChatSessionCreateRequest, ChatSessionUpdateRequest,
     StatsResponse, UploadResponse, HealthResponse,
@@ -965,8 +965,16 @@ async def chat(body: ChatRequest) -> ChatResponse:
     else:
         reply = chat_with_context(app.state.llm, body.message, context_docs)
 
-    # Collect source document IDs
+    # Collect source document IDs and titles
     source_doc_ids: list[str] = [doc["id"] for doc in context_docs]
+    source_docs = [
+        SourceDocument(
+            id=doc["id"],
+            title=doc.get("title") or doc.get("filename") or "Document",
+            filename=doc.get("filename"),
+        )
+        for doc in context_docs
+    ]
 
     # Store assistant reply
     insert_chat_message(str(uuid.uuid4()), reply, "assistant", session_id, source_doc_ids)
@@ -981,6 +989,7 @@ async def chat(body: ChatRequest) -> ChatResponse:
     return ChatResponse(
         reply=reply,
         source_document_ids=source_doc_ids,
+        source_documents=source_docs,
         session_id=session_id,
     )
 
@@ -1162,6 +1171,18 @@ async def chat_history(
             detail=f"Chat session '{session_id}' not found",
         )
     messages = get_chat_history(session_id=session_id, limit=limit, offset=offset)
+    for message in messages:
+        doc_ids = message.get("context_doc_ids") or []
+        sources = []
+        for doc_id in doc_ids:
+            doc = get_document(doc_id)
+            if doc is not None:
+                sources.append(SourceDocument(
+                    id=doc["id"],
+                    title=doc.get("title") or doc.get("filename") or "Document",
+                    filename=doc.get("filename"),
+                ))
+        message["context_docs"] = sources
     return ChatHistoryResponse(messages=messages)
 
 

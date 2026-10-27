@@ -915,7 +915,7 @@ def get_chat_history(
             """
             SELECT * FROM chat_history
             WHERE session_id = ?
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, rowid DESC
             LIMIT ? OFFSET ?;
             """,
             (session_id, limit, offset),
@@ -945,7 +945,7 @@ def get_session_messages_for_llm(
             """
             SELECT role, message FROM chat_history
             WHERE session_id = ?
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, rowid DESC
             LIMIT ?;
             """,
             (session_id, limit),

@@ -125,12 +125,12 @@ function DocumentsContent() {
       />
 
       {/* Filters row */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-nowrap items-center gap-2">
         {/* Type filter */}
         <select
           value={docType}
           onChange={(e) => setDocType(e.target.value)}
-          className="min-h-[44px] min-w-0 flex-1 basis-40 px-3 py-2 text-sm bg-white border border-beige-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/30 sm:flex-none"
+          className="min-h-[44px] min-w-0 flex-1 px-2 py-2 text-sm bg-white border border-beige-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/30 sm:flex-none sm:px-3"
         >
           <option value="">Tous les types</option>
           {DOC_TYPES.map((t) => (
@@ -144,7 +144,7 @@ function DocumentsContent() {
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as 'newest' | 'oldest' | 'name' | 'type')}
-          className="min-h-[44px] min-w-0 flex-1 basis-36 px-3 py-2 text-sm bg-white border border-beige-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/30 sm:flex-none"
+          className="min-h-[44px] min-w-0 flex-1 px-2 py-2 text-sm bg-white border border-beige-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/30 sm:flex-none sm:px-3"
         >
           <option value="newest">Plus récents</option>
           <option value="oldest">Plus anciens</option>
@@ -152,11 +152,8 @@ function DocumentsContent() {
           <option value="type">Type</option>
         </select>
 
-        {/* Spacer */}
-        <div className="flex-1" />
-
         {/* View toggle */}
-        <div className="flex bg-white border border-beige-300 rounded-lg overflow-hidden">
+        <div className="flex shrink-0 overflow-hidden rounded-lg border border-beige-300 bg-white">
           <button
             onClick={() => setView('grid')}
             className={`flex h-11 w-11 items-center justify-center ${view === 'grid' ? 'bg-accent text-white' : 'text-[#6b7280] hover:bg-beige-100'}`}

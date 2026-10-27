@@ -187,36 +187,49 @@ function ToolCallsPanel({ toolCalls }: { toolCalls: ToolCallLog[] }) {
 
 const sourceTitleCache = new Map<string, string>();
 
-function SourceChip({ docId }: { docId: string }) {
+function SourceChip({ docId, title: providedTitle }: { docId: string; title?: string }) {
   const [title, setTitle] = useState(
-    () => sourceTitleCache.get(docId) || `Doc ${docId.slice(0, 8)}…`,
+    () => providedTitle || sourceTitleCache.get(docId) || '',
   );
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
-    if (sourceTitleCache.has(docId)) return;
+    if (providedTitle) {
+      sourceTitleCache.set(docId, providedTitle);
+      setTitle(providedTitle);
+      return;
+    }
+    if (sourceTitleCache.has(docId)) {
+      setTitle(sourceTitleCache.get(docId) || '');
+      return;
+    }
     let cancelled = false;
     getDocument(docId)
       .then((doc) => {
-        const label = doc.title || doc.filename || `Doc ${docId.slice(0, 8)}…`;
-        sourceTitleCache.set(docId, label);
+        const label = doc.title || doc.filename || '';
+        if (label) sourceTitleCache.set(docId, label);
         if (!cancelled) setTitle(label);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setMissing(true);
+      });
     return () => { cancelled = true; };
-  }, [docId]);
+  }, [docId, providedTitle]);
+
+  if (missing) return null;
 
   return (
     <Link
       href={`/documents/view?id=${docId}`}
       className="inline-flex max-w-full items-center gap-1 rounded-full bg-beige-100 px-2.5 py-1 text-xs text-[#1a1a1a] transition-colors hover:bg-beige-200"
       onClick={(e) => e.stopPropagation()}
-      title={title}
+      title={title || 'Document'}
     >
       <svg width="10" height="10" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
         <path d="M3 2H8L11 5V12H3V2Z" />
         <path d="M8 2V5H11" />
       </svg>
-      <span className="truncate">{title}</span>
+      <span className="truncate">{title || 'Document…'}</span>
     </Link>
   );
 }
@@ -264,13 +277,17 @@ export default function ChatMessage({ message }: ChatMessageProps) {
             )}
 
             {/* Source documents (RAG mode) */}
-            {!isUser && message.context_doc_ids && message.context_doc_ids.length > 0 && (
+            {!isUser && ((message.context_docs?.length ?? 0) > 0 || (message.context_doc_ids?.length ?? 0) > 0) && (
               <div className="mt-2 pt-2 border-t border-beige-200/50">
                 <p className="text-xs text-[#6b7280] mb-1.5">Sources :</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {message.context_doc_ids.map((docId) => (
-                    <SourceChip key={docId} docId={docId} />
-                  ))}
+                  {message.context_docs?.length
+                    ? message.context_docs.map((doc) => (
+                        <SourceChip key={doc.id} docId={doc.id} title={doc.title} />
+                      ))
+                    : message.context_doc_ids?.map((docId) => (
+                        <SourceChip key={docId} docId={docId} />
+                      ))}
                 </div>
               </div>
             )}
