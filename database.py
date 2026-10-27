@@ -109,6 +109,10 @@ def init_db() -> None:
             ("pages_done", "INTEGER DEFAULT 0"),
             ("pages_total", "INTEGER DEFAULT 0"),
             ("ocr_backend", "TEXT"),
+            ("ocr_seconds", "REAL"),
+            ("llm_seconds", "REAL"),
+            ("total_seconds", "REAL"),
+            ("error_message", "TEXT"),
         ):
             try:
                 cur.execute(f"ALTER TABLE documents ADD COLUMN {col} {decl};")
@@ -605,6 +609,7 @@ def update_document_fields(doc_id: str, **fields: Any) -> None:
         "date_expiration", "date_echeance",
         "parent_id", "page_start", "page_end",
         "pages_done", "pages_total", "ocr_backend",
+        "ocr_seconds", "llm_seconds", "total_seconds", "error_message",
     }
     to_update = {k: v for k, v in fields.items() if k in allowed}
     if not to_update:
@@ -1000,6 +1005,11 @@ def get_stats() -> dict[str, Any]:
             (today, in_30_days),
         ).fetchone()["cnt"]
 
+        status_rows = conn.execute(
+            "SELECT status, COUNT(*) AS cnt FROM documents GROUP BY status;"
+        ).fetchall()
+        by_status = {row["status"] or "unknown": row["cnt"] for row in status_rows}
+
         # Overdue: documents with date_expiration before today
         overdue = conn.execute(
             """
@@ -1018,6 +1028,7 @@ def get_stats() -> dict[str, Any]:
         "recent_documents": recent_documents,
         "expiring_soon_count": expiring_soon,
         "overdue_count": overdue,
+        "by_status": by_status,
     }
 
 

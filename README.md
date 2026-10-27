@@ -161,6 +161,22 @@ Single process — Port 8000
 
 ---
 
+## ⌨️ CLI
+
+`bin/documind` pilote l'API HTTP sans dépendance lourde (sortie JSON par
+défaut, `--human` pour un rendu lisible) :
+
+```bash
+./bin/documind upload scan.pdf --wait
+./bin/documind list --type facture --since 2024-01-01
+./bin/documind show <id> --pages
+./bin/documind search "facture électricité"
+./bin/documind ask "Quelle est la date d'expiration de ma carte d'identité ?"
+./bin/documind bench /srv/docs-test --out /opt/documind-data/bench/run.csv
+```
+
+Guide complet pour les agents et utilisateurs : [`skills/documind/SKILL.md`](skills/documind/SKILL.md).
+
 ## 📡 API Reference
 
 Interactive docs at **[http://localhost:8000/docs](http://localhost:8000/docs)**.

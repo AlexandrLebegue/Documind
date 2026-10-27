@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -41,6 +42,7 @@ from database import (
     get_documents_for_gap_detection,
     dismiss_alert as db_dismiss_alert, undismiss_alert as db_undismiss_alert,
     get_dismissed_alert_keys,
+    get_child_documents,
 )
 from models import (
     DocumentResponse, DocumentListResponse, DocumentUpdateRequest,
@@ -91,6 +93,7 @@ def _app_version() -> str:
 
 
 _VERSION = _app_version()
+_START_TIME = time.time()
 
 
 # ---------------------------------------------------------------------------
@@ -380,6 +383,33 @@ async def health_check() -> HealthResponse:
     )
 
 
+@app.get(
+    "/api/system",
+    summary="Runtime system metrics",
+    description="Process memory, uptime and document counts for local benchmarking.",
+)
+async def system_metrics() -> dict:
+    """Return lightweight server-side runtime metrics."""
+    rss_kb = peak_kb = 0
+    try:
+        with open("/proc/self/status", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    rss_kb = int(line.split()[1])
+                elif line.startswith("VmHWM:"):
+                    peak_kb = int(line.split()[1])
+    except OSError:
+        pass
+    stats = get_stats()
+    return {
+        "rss_mb": round(rss_kb / 1024, 1),
+        "peak_rss_mb": round(peak_kb / 1024, 1),
+        "uptime_seconds": round(time.time() - _START_TIME, 1),
+        "total_documents": stats["total_documents"],
+        "by_status": stats.get("by_status", {}),
+    }
+
+
 # ── Upload ─────────────────────────────────────────────────────────────────
 
 
@@ -507,6 +537,20 @@ async def get_doc(doc_id: str) -> DocumentResponse:
     return _parse_document(doc)
 
 
+@app.get(
+    "/api/documents/{doc_id}/segments",
+    response_model=list[DocumentResponse],
+    summary="List the segments produced from a multi-document scan",
+    description="Return the child documents created from a source scan, with "
+    "their page ranges and metadata.",
+)
+async def get_doc_segments(doc_id: str) -> list[DocumentResponse]:
+    """Return child documents for a segmented source scan."""
+    if get_document(doc_id) is None:
+        raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
+    return [_parse_document(child) for child in get_child_documents(doc_id)]
+
+
 @app.put(
     "/api/documents/{doc_id}",
     response_model=DocumentResponse,
@@ -547,6 +591,8 @@ async def delete_doc(doc_id: str) -> JSONResponse:
     if doc is None:
         raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
 
+    for child in get_child_documents(doc_id):
+        delete_document(child["id"])
     delete_document(doc_id)
     if app.state.embeddings_cache is not None:
         app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)

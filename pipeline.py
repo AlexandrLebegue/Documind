@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import traceback
 import uuid
 from pathlib import Path
@@ -66,6 +67,18 @@ def _split_page_markers(text: str) -> list[str]:
     return pages or [text.strip()]
 
 
+def _mark_error(doc_id: str, stage: str, exc: BaseException | None = None) -> None:
+    """Set a document to error status and keep a short, non-sensitive reason."""
+    message = f"{stage} failed"
+    if exc is not None:
+        message = f"{stage}: {type(exc).__name__}: {str(exc)[:300]}"
+    try:
+        update_document_status(doc_id, "error")
+        update_document_fields(doc_id, error_message=message)
+    except Exception:
+        logger.debug("Could not persist error state", exc_info=True)
+
+
 def _segment_filename(original: str, start: int, end: int) -> str:
     path = Path(original)
     suffix = path.suffix or ".pdf"
@@ -85,7 +98,9 @@ def _process_segment(
 
     Returns True on success, False if the document was marked as errored.
     """
+    started = time.perf_counter()
     text = _join_pages(pages, offset=page_start - 1)
+    metadata_started = time.perf_counter()
     try:
         update_document_text(doc_id, text)
         update_document_fields(
@@ -103,29 +118,38 @@ def _process_segment(
         ):
             metadata["titre"] = segment_title
         _save_metadata(doc_id, metadata)
+        update_document_fields(
+            doc_id,
+            llm_seconds=round(time.perf_counter() - metadata_started, 3),
+        )
         logger.info(
             "Metadata ready for %s (type=%s, titre='%s')",
             doc_id[:8],
             metadata.get("type"),
             metadata.get("titre", ""),
         )
-    except Exception:
+    except Exception as exc:
         logger.error(
             "Metadata step failed for doc %s:\n%s", doc_id, traceback.format_exc()
         )
-        update_document_status(doc_id, "error")
+        _mark_error(doc_id, "metadata", exc)
         return False
 
     try:
         embedding = generate_embedding(embedding_model, text)
         update_document_embedding(doc_id, serialize_embedding(embedding))
-    except Exception:
+    except Exception as exc:
         logger.error(
             "Embedding step failed for doc %s:\n%s", doc_id, traceback.format_exc()
         )
-        update_document_status(doc_id, "error")
+        _mark_error(doc_id, "embedding", exc)
         return False
 
+    update_document_fields(
+        doc_id,
+        total_seconds=round(time.perf_counter() - started, 3),
+        error_message=None,
+    )
     update_document_status(doc_id, "ready")
     logger.info("Document %s ready (%d page(s))", doc_id[:8], len(pages))
     return True
@@ -156,7 +180,7 @@ def process_document(
         return
     if llm is None:
         logger.error("No LLM client available — cannot process %s", doc_id)
-        update_document_status(doc_id, "error")
+        _mark_error(doc_id, "llm_client")
         return
 
     def _progress(done: int, total: int) -> None:
@@ -165,19 +189,23 @@ def process_document(
         except Exception:
             logger.debug("Could not persist OCR progress", exc_info=True)
 
+    overall_started = time.perf_counter()
+    ocr_started = time.perf_counter()
     try:
         pages = extract_pages(file_path, progress_cb=_progress)
-    except Exception:
+    except Exception as exc:
         logger.error(
             "OCR failed for doc %s:\n%s", doc_id, traceback.format_exc()
         )
-        update_document_status(doc_id, "error")
+        _mark_error(doc_id, "ocr", exc)
         return
 
+    ocr_seconds = round(time.perf_counter() - ocr_started, 3)
     if not pages:
         pages = [""]
     total = len(pages)
     update_document_progress(doc_id, total, total, OCR_BACKEND)
+    update_document_fields(doc_id, ocr_seconds=ocr_seconds)
 
     try:
         segments = segment_documents(llm, pages)
@@ -224,6 +252,12 @@ def process_document(
                 embedding_model=embedding_model,
                 segment_title=segment.get("titre"),
             )
+        children = get_child_documents(doc_id)
+        update_document_fields(
+            doc_id,
+            llm_seconds=round(sum(c.get("llm_seconds") or 0 for c in children), 3),
+            total_seconds=round(time.perf_counter() - overall_started, 3),
+        )
         logger.info(
             "Segmented document %s into %d document(s)", doc_id[:8], len(segments)
         )
@@ -236,6 +270,11 @@ def process_document(
         page_start=1,
         llm=llm,
         embedding_model=embedding_model,
+    )
+    update_document_fields(
+        doc_id,
+        ocr_seconds=ocr_seconds,
+        total_seconds=round(time.perf_counter() - overall_started, 3),
     )
 
 
@@ -288,7 +327,7 @@ def reprocess_document(
         logger.error(
             "Cannot reprocess doc %s: file not found at '%s'", doc_id, file_path
         )
-        update_document_status(doc_id, "error")
+        _mark_error(doc_id, "file_missing")
         return
 
     # Re-OCR from the original file (OCR page cache makes this cheap).
@@ -300,9 +339,9 @@ def reprocess_document(
 
     try:
         pages = extract_pages(file_path, progress_cb=_progress)
-    except Exception:
+    except Exception as exc:
         logger.error("Reprocess OCR failed for doc %s:\n%s", doc_id, traceback.format_exc())
-        update_document_status(doc_id, "error")
+        _mark_error(doc_id, "ocr", exc)
         return
 
     if doc.get("parent_id"):

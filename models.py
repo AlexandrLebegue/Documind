@@ -28,6 +28,10 @@ class DocumentResponse(BaseModel):
     pages_done: Optional[int] = 0
     pages_total: Optional[int] = 0
     ocr_backend: Optional[str] = None
+    ocr_seconds: Optional[float] = None
+    llm_seconds: Optional[float] = None
+    total_seconds: Optional[float] = None
+    error_message: Optional[str] = None
     status: str
     created_at: str
     updated_at: str
