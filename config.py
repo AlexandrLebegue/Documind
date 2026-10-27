@@ -153,7 +153,7 @@ INGEST_JUDGE_CONFIDENCE = float(os.environ.get("INGEST_JUDGE_CONFIDENCE", "0.7")
 
 # Server settings
 HOST = "0.0.0.0"
-PORT = 8000
+PORT = int(os.environ.get("PORT", "8000"))
 # Comma-separated list of allowed CORS origins. "*" allows every origin,
 # which is the historic behaviour; the desktop client uses tauri://localhost
 # (Linux/macOS) and http://tauri.localhost (Windows).

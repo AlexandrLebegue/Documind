@@ -169,6 +169,80 @@ documind bench /srv/docs-test --out /opt/documind-data/bench/run.csv --resume
 For agents and advanced usage (API details, errors, multi-document handling), see
 [`skills/documind/SKILL.md`](skills/documind/SKILL.md).
 
+## 💻 Client PC (Tauri 2)
+
+Le client PC réutilise exactement l'interface web (export statique Next.js) dans
+une fenêtre native Tauri 2 — environ 10 Mo, WebView du système, aucun Electron.
+Téléchargez l'installeur depuis la page **Releases** du dépôt :
+
+- **Windows** : `DocuMind_<version>_x64-setup.exe` (NSIS, inclut `documind-agent.exe`)
+- **Linux** : `.AppImage` ou `.deb` (dépendances `webkit2gtk-4.1`)
+
+### Premier lancement
+
+1. Lancez DocuMind. Un écran plein écran demande l'adresse du serveur, par
+   exemple `192.168.1.67:8000`.
+2. La validation appelle `/api/system` ; un message clair s'affiche si le
+   serveur est injoignable.
+3. Une animation géométrique courte (600–1200 ms, désactivée si
+   `prefers-reduced-motion`) ouvre l'application.
+4. L'adresse est mémorisée dans le store Tauri et peut être changée dans
+   **Paramètres → Changer de serveur**.
+
+Côté serveur, le CORS accepte par défaut toutes les origines (comportement
+historique) et les origines Tauri `tauri://localhost`,
+`http://tauri.localhost`, `https://tauri.localhost`. Pour restreindre, définissez
+`CORS_ORIGINS` (liste séparée par des virgules).
+
+### Synchronisation automatique de dossiers
+
+Dans **Paramètres → Synchronisation automatique** (client PC uniquement) :
+
+- ajoutez un ou plusieurs dossiers (sélecteur natif ou saisie manuelle) ;
+- choisissez l'intervalle (15 min, 1 h, 6 h, 24 h) et activez la synchronisation ;
+- installez le service : **service Windows** (démarrage automatique au boot,
+  élévation UAC demandée) ou **unité systemd --user** sur Linux ;
+- consultez l'état du service, le dernier passage et les compteurs
+  envoyés / acceptés / refusés / ignorés.
+
+L'agent (`documind-agent`) filtre localement avant tout envoi : extensions
+`.pdf .txt .jpg .jpeg .png .bmp`, vérification des magic bytes, fichiers cachés
+et temporaires exclus, fichiers instables sur deux relevés, taille entre 1 Ko et
+50 Mo. Il calcule le SHA-256 (cache chemin+taille+mtime) et n'envoie que les
+empreintes inconnues du serveur. Un fichier déjà accepté ou refusé n'est jamais
+renvoyé, même déplacé ou renommé.
+
+Côté serveur, chaque candidat est revalidé (extension + magic bytes), OCRisé
+(cache de pages réutilisé), puis jugé par MiniCPM texte seul :
+`{keep, confidence, reason}`. Un OUI franc crée le document en réutilisant l'OCR ;
+un NON franc supprime le fichier et ne garde que l'empreinte ; un doute
+(confiance < 0,7) part en validation manuelle dans **Synchronisation** (web et
+desktop), avec actions Accepter / Refuser / Réévaluer.
+
+Configuration partagée : `%ProgramData%\DocuMind\agent.json` sous Windows,
+`~/.config/documind/agent.json` sous Linux. Logs rotatifs dans
+`logs/agent.log`. CLI :
+
+```bash
+documind marks --verdict pending --human
+documind marks --accept <sha256>
+documind marks --reject <sha256>
+documind marks --reevaluate <sha256>
+```
+
+### Construire le client localement
+
+```bash
+rustup toolchain install stable
+cd desktop
+cargo build --release -p documind-agent
+cp target/release/documind-agent src-tauri/binaries/documind-agent-$(rustc -vV | sed -n 's/host: //p')
+npm ci && npx tauri build
+```
+
+Les builds Windows/Linux complets sont produits par
+`.github/workflows/desktop.yml` (tag `v*` → Release GitHub).
+
 ## 📊 Benchmarking
 
 `documind bench` ingests every supported file (or a list via `--files-from`),
@@ -209,6 +283,12 @@ Interactive docs: `http://<host>:8000/docs`.
 | `GET` | `/api/stats` | Dashboard statistics |
 | `GET` | `/api/alerts` | Expiry/renewal/gap alerts |
 | `GET` | `/api/procedures` | Administrative procedures |
+| `POST` | `/api/ingest/check` | Hashes déjà jugés + hashes inconnus |
+| `POST` | `/api/ingest/candidate` | Candidat de synchronisation (multipart) |
+| `GET` | `/api/ingest/marks` | Registre des empreintes et verdicts |
+| `POST` | `/api/ingest/marks/{sha}/accept` | Accepter un candidat en attente |
+| `POST` | `/api/ingest/marks/{sha}/reject` | Refuser un candidat |
+| `POST` | `/api/ingest/marks/{sha}/reevaluate` | Forcer une réévaluation |
 
 ### Examples
 

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import LayoutShell from '@/components/LayoutShell';
+import DesktopGate from '@/components/DesktopGate';
 
 export const metadata: Metadata = {
   title: 'DocuMind — Gestion documentaire intelligente',
@@ -32,7 +33,9 @@ export default function RootLayout({
   return (
     <html lang="fr">
       <body className="bg-beige-100 text-[#1a1a1a]">
-        <LayoutShell>{children}</LayoutShell>
+        <DesktopGate>
+          <LayoutShell>{children}</LayoutShell>
+        </DesktopGate>
       </body>
     </html>
   );

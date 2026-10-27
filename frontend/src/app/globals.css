@@ -96,3 +96,34 @@ html, body { overflow-x: hidden; }
     scroll-behavior: auto !important;
   }
 }
+
+/* ── Desktop first-run geometric transition (600–1200 ms) ──────────────── */
+@keyframes geo-diamond-in {
+  0% { opacity: 0; transform: rotate(0deg) scale(0.2); }
+  55% { opacity: 1; transform: rotate(45deg) scale(1.06); }
+  100% { opacity: 1; transform: rotate(45deg) scale(1); }
+}
+
+@keyframes geo-line-in {
+  0% { opacity: 0; transform: scaleX(0); }
+  100% { opacity: 0.7; transform: scaleX(1); }
+}
+
+@keyframes geo-overlay-out {
+  0%, 70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.geo-overlay { animation: geo-overlay-out 950ms ease-in both; }
+.geo-lines { transform-origin: center; animation: geo-line-in 500ms ease-out both; }
+.geo-diamond { transform-box: fill-box; transform-origin: center; animation: geo-diamond-in 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.geo-d1 { animation-delay: 0ms; }
+.geo-d2 { animation-delay: 70ms; }
+.geo-d3 { animation-delay: 140ms; }
+.geo-d4 { animation-delay: 210ms; }
+.geo-d5 { animation-delay: 280ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .geo-overlay { animation-duration: 180ms; }
+  .geo-lines, .geo-diamond { animation: none; opacity: 1; transform: rotate(45deg); }
+}

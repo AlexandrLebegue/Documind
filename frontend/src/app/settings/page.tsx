@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSettings, updateSettings, checkForUpdate, applyUpdate, triggerNasSync, testLlamaCppConnection } from '@/lib/api';
 import type { Settings, UpdateCheckResult, NasSyncResult } from '@/lib/api';
+import AgentSettings from '@/components/AgentSettings';
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -813,6 +814,8 @@ export default function SettingsPage() {
           Compare la branche <code className="font-mono">main</code> locale avec GitHub. La mise à jour effectue un <code className="font-mono">git pull</code>, reinstalle les dépendances, puis redémarre le serveur automatiquement.
         </p>
       </div>
+
+      <AgentSettings />
 
       {/* Save button — sticky on mobile */}
       <div className="sticky bottom-0 bg-beige-100 py-4 -mx-4 px-4 sm:-mx-6 sm:px-6 border-t border-beige-300 sm:border-0 sm:bg-transparent sm:static sm:py-0 sm:mx-0 sm:px-0">

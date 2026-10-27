@@ -63,6 +63,18 @@ const navItems = [
       </svg>
     ),
   },
+  {
+    label: 'Synchronisation',
+    href: '/sync',
+    icon: (
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 10A7 7 0 0 1 15.5 5.5" />
+        <path d="M15.5 2.5V5.5H12.5" />
+        <path d="M17 10A7 7 0 0 1 4.5 14.5" />
+        <path d="M4.5 17.5V14.5H7.5" />
+      </svg>
+    ),
+  },
 ];
 
 interface SidebarProps {

@@ -1,4 +1,39 @@
-const API_BASE = '/api';
+const WEB_API_BASE = '/api';
+const SERVER_STORAGE_KEY = 'documind_server';
+
+export function isDesktopApp(): boolean {
+  return typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__);
+}
+
+export function normalizeServerAddress(value: string): string {
+  let address = (value || '').trim().replace(/\/+$/, '');
+  if (!address) return '';
+  if (!/^https?:\/\//i.test(address)) address = `http://${address}`;
+  return address;
+}
+
+export function getConfiguredServer(): string {
+  if (typeof window === 'undefined') return '';
+  return normalizeServerAddress(window.localStorage.getItem(SERVER_STORAGE_KEY) || '');
+}
+
+export function setConfiguredServer(value: string): string {
+  const address = normalizeServerAddress(value);
+  if (typeof window !== 'undefined') {
+    if (address) window.localStorage.setItem(SERVER_STORAGE_KEY, address);
+    else window.localStorage.removeItem(SERVER_STORAGE_KEY);
+  }
+  return address;
+}
+
+// Relative in web mode (unchanged), absolute in the desktop client.
+export function getApiBase(): string {
+  if (isDesktopApp()) {
+    const server = getConfiguredServer();
+    if (server) return `${server}/api`;
+  }
+  return WEB_API_BASE;
+}
 
 // Types
 export interface Document {
@@ -167,7 +202,7 @@ export interface ProcedureExecution {
 
 // Generic fetch wrapper with error handling
 async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
-  const url = `${API_BASE}${path}`;
+  const url = `${getApiBase()}${path}`;
   const res = await fetch(url, {
     ...options,
     headers: {
@@ -191,7 +226,7 @@ async function fetchAPI<T>(path: string, options?: RequestInit): Promise<T> {
 
 // Document file URL (for <img> / <iframe> src)
 export function getDocumentFileUrl(id: string): string {
-  return `${API_BASE}/documents/${id}/file`;
+  return `${getApiBase()}/documents/${id}/file`;
 }
 
 // Document operations
@@ -318,7 +353,7 @@ export function streamAgentMessage(
   const controller = new AbortController();
 
   (async () => {
-    const res = await fetch(`${API_BASE}/agent/chat/stream`, {
+    const res = await fetch(`${getApiBase()}/agent/chat/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -583,5 +618,57 @@ export async function getQueue(): Promise<QueueStatus> {
 // ---------------------------------------------------------------------------
 
 export function createLogsEventSource(): EventSource {
-  return new EventSource(`${API_BASE}/logs`);
+  return new EventSource(`${getApiBase()}/logs`);
+}
+
+
+// ---------------------------------------------------------------------------
+// Folder-sync ingestion (desktop agent)
+// ---------------------------------------------------------------------------
+
+export interface IngestMark {
+  sha256: string;
+  verdict: 'pending' | 'accepted' | 'rejected' | 'error';
+  doc_id?: string;
+  reason?: string;
+  source?: string;
+  origin_path?: string;
+  filename?: string;
+  confidence?: number;
+  first_seen: string;
+  verdict_at?: string;
+  updated_at: string;
+  has_file: boolean;
+  title?: string;
+}
+
+export interface IngestMarksResponse {
+  marks: IngestMark[];
+  total: number;
+  counts: Record<string, number>;
+}
+
+export async function getIngestMarks(params?: {
+  verdict?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<IngestMarksResponse> {
+  const searchParams = new URLSearchParams();
+  if (params?.verdict) searchParams.set('verdict', params.verdict);
+  if (params?.limit !== undefined) searchParams.set('limit', String(params.limit));
+  if (params?.offset !== undefined) searchParams.set('offset', String(params.offset));
+  const query = searchParams.toString();
+  return fetchAPI(`/ingest/marks${query ? `?${query}` : ''}`);
+}
+
+export async function acceptIngestMark(sha256: string): Promise<{ status: string; sha256: string }> {
+  return fetchAPI(`/ingest/marks/${sha256}/accept`, { method: 'POST' });
+}
+
+export async function rejectIngestMark(sha256: string): Promise<IngestMark> {
+  return fetchAPI(`/ingest/marks/${sha256}/reject`, { method: 'POST' });
+}
+
+export async function reevaluateIngestMark(sha256: string): Promise<{ status: string; sha256: string }> {
+  return fetchAPI(`/ingest/marks/${sha256}/reevaluate`, { method: 'POST' });
 }

@@ -1,0 +1,111 @@
+name: Desktop
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "desktop/**"
+      - "frontend/**"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            label: Windows (NSIS)
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+          - platform: ubuntu-22.04
+            label: Linux (AppImage + deb)
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libxdo-dev \
+            libssl-dev \
+            pkg-config
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build agent
+        run: cargo build --release -p documind-agent --manifest-path desktop/Cargo.toml
+
+      - name: Stage agent sidecar (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          cp desktop/target/release/documind-agent \
+             desktop/src-tauri/binaries/documind-agent-${{ matrix.target }}
+
+      - name: Stage agent sidecar (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        run: |
+          cp desktop/target/release/documind-agent.exe \
+             desktop/src-tauri/binaries/documind-agent-${{ matrix.target }}.exe
+
+      - name: Build Tauri app and release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('DocuMind Desktop {0}', github.ref_name) || '' }}
+          releaseBody: |
+            Client PC DocuMind (Tauri 2) et agent de synchronisation de dossiers.
+
+            - Windows : installeur NSIS, inclut `documind-agent.exe`
+            - Linux : `.AppImage` et `.deb`
+          releaseDraft: false
+          prerelease: false
+          args: --bundles ${{ matrix.bundles }}
+
+      - name: Upload workflow artifacts (non-tag builds)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: documind-desktop-${{ matrix.target }}
+          if-no-files-found: warn
+          path: |
+            desktop/target/release/bundle/nsis/*.exe
+            desktop/target/release/bundle/msi/*.msi
+            desktop/target/release/bundle/appimage/*.AppImage
+            desktop/target/release/bundle/deb/*.deb
