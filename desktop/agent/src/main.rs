@@ -311,7 +311,9 @@ fn check_magic(path: &Path, ext: &str) -> Result<(), String> {
 fn hash_file(path: &Path) -> Result<String, String> {
     let mut file = fs::File::open(path).map_err(|err| err.to_string())?;
     let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 1024 * 1024];
+    // Windows main/SCM threads have a small default stack. A 1 MiB stack
+    // array overflows before the first /check; keep the hash buffer on the heap.
+    let mut buffer = vec![0u8; 1024 * 1024];
     loop {
         let read = file.read(&mut buffer).map_err(|err| err.to_string())?;
         if read == 0 {
