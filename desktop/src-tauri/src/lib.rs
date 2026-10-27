@@ -216,7 +216,7 @@ fn run_agent(args: &[&str], elevated: bool) -> Result<(), String> {
             .collect::<Vec<_>>()
             .join(" ");
         let script = format!(
-            "$p = Start-Process -FilePath '{}' -ArgumentList '{}' -Verb RunAs -WindowStyle Hidden -PassThru; if (!$p.WaitForExit(110000)) {{ Stop-Process -Id $p.Id -Force; exit 124 }}; exit $p.ExitCode",
+            "$ErrorActionPreference = 'Stop'; $p = Start-Process -FilePath '{}' -ArgumentList '{}' -Verb RunAs -WindowStyle Hidden -PassThru; if (!$p.WaitForExit(110000)) {{ Stop-Process -Id $p.Id -Force; exit 124 }}; exit $p.ExitCode",
             binary.to_string_lossy().replace('\'', "''"), arguments.replace('\'', "''")
         );
         let status = wait_command(
