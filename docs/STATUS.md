@@ -14,6 +14,10 @@
 - Cache OCR par page : `sha256(fichier) + n° page` sous `DATA_DIR/ocr_cache/`.
 - Embeddings chargés paresseusement (gain RAM/démarrage), connexions SQLite réutilisées par thread.
 - Aucun document personnel dans git / docs / logs poussés ; bench stocké sur LXC 105.
+- Types canoniques : scolarité, santé, logement, banque (`releve_bancaire`), emploi, administratif ; `identite` réservé CNI/passeport/titre de séjour/permis.
+- Classification : alias + mots-clés + titre + indice de nom de fichier ; titre `type — émetteur — date`, sans tags LLM ni libellés génériques.
+- Dédoublonnage SHA-256 à l'upload et via `documind dedupe` ; les fichiers physiques ne sont pas supprimés.
+- Reprocessus inclut désormais les documents enfants et exclut les racines déjà segmentées.
 
 ## Mesures
 - Démarrage (LXC 105) : RSS 473 Mo → 32 Mo, embeddings différés (`docs/PERF.md`).
@@ -26,6 +30,9 @@
 - Corpus complet 88 fichiers / 158 pages : 90 documents, 0 erreur, ~35 min, crête 925 Mo. OCR à froid sur contenus uniques : 35 pages scannées, moyenne 41,48 s/page, médiane 36,30, p90 61,23. 28 doublons exacts, 6 doublons scannés servis par le cache (~508 s économisées).
 - Segmentation réelle : 1 scan de 5 pages → 3 documents (1–2, 3–4, 5–5). 7 fichiers non supportés ignorés sans erreur.
 - Comparaison Tesseract sur 3 scans : Ovis lit correctement les cartes (Tesseract dégrade nom/date ou ne rend presque rien) ; quasi-identique sur un contrat propre (similarité 0,992).
+- Dédoublonnage SHA-256 : 90 → 62 documents (28 doublons supprimés), second passage : 0 doublon.
+- Retraitement complet (racines + enfants) : 62 documents, 0 erreur ; `autre` = 0, expirés = 0, échéances < 30 j = 0, 63 documents au total.
+- UI mobile vérifiée en 360 et 390 px : aucun débordement horizontal, titre du document avant l'aperçu, boutons principaux ≥ 44 px.
 
 ## TODO
 - [x] A. Profiling + optimisations mesurées
@@ -36,3 +43,6 @@
 - [x] E. CLI + skill (`cli.py`, `bin/documind`, `skills/documind/SKILL.md`, endpoints system/segments)
 - [x] F. Bench (`documind bench`, reprise, `docs/BENCH.md` : 10 fichiers puis 88)
 - [x] G. README / `.env.example` / installeurs Proxmox locaux (sans clé API)
+- [x] H. Classification canonique + dédoublonnage + alertes + titres utiles (commit `9f9c26d`)
+- [x] I. UI mobile : navigation, chat, procédures, logs, aperçu document, cibles tactiles 44 px (commit `7493a68`)
+- [ ] J. Contrôle visuel desktop final et clôture du brief UI
