@@ -6,7 +6,8 @@
 - Dépôt de travail : `/home/dev/projects/Documind` (LXC 103), branche `main`.
 - Cible : LXC 105 `documind`, `ssh root@192.168.1.67`, app `/opt/documind`, données `/opt/documind-data`, port 8000.
 - OvisOCR3 : `http://192.168.1.59:8081/v1`, modèle `ovisocr3` — **OK**.
-- MiniCPM5-2B : `http://192.168.1.59:8080/v1`, alias `minicpm5-2b` — **OK** (relancé par ProxBoss), thinking désactivé.
+- MiniCPM5-2B : `http://192.168.1.59:8080/v1`, alias `minicpm5-2b` — **OK**, thinking désactivé.
+- Hôte GPU `.59` : relancé par ProxBoss après saturation du cache RAM de `llama-server` (plafonné à 256 Mo).
 
 ## Décisions
 - Pipeline cible : OvisOCR3 page par page (CPU, séquentiel) → MiniCPM **texte seul** (mise en forme + métadonnées + segmentation).
@@ -18,6 +19,12 @@
 - Classification : alias + mots-clés + titre + indice de nom de fichier ; titre `type — émetteur — date`, sans tags LLM ni libellés génériques.
 - Dédoublonnage SHA-256 à l'upload et via `documind dedupe` ; les fichiers physiques ne sont pas supprimés.
 - Reprocessus inclut désormais les documents enfants et exclut les racines déjà segmentées.
+- Ingestion synchronisée : registre `file_marks` clé SHA-256, verdicts `pending|accepted|rejected|error`, seuil `INGEST_JUDGE_CONFIDENCE=0.7`.
+- Candidat accepté : OCR réutilisé (`process_extracted_pages`), fichier déplacé dans `originals/` ; refusé : fichier supprimé, seules empreinte + raison conservées ; doute : fichier + texte gardés pour validation manuelle.
+- CORS : `CORS_ORIGINS` configurable, défaut `*` + origines Tauri (`tauri://localhost`, `http://tauri.localhost`, `https://tauri.localhost`).
+- Client desktop : Tauri 2, même export statique Next.js, écran de connexion animé (950 ms, réduit si `prefers-reduced-motion`), adresse mémorisée côté Tauri et localStorage.
+- Agent : filtres locaux (extensions, magic bytes, cachés/temporaires, taille 1 Ko–50 Mo, stabilité 2 passages), cache SHA-256 chemin+taille+mtime, check serveur puis upload des seules empreintes inconnues.
+- Service agent : Windows `sc` + runtime `windows-service` (ProgramData), Linux unité `systemd --user` avec copie stable dans `~/.local/bin`.
 
 ## Mesures
 - Démarrage (LXC 105) : RSS 473 Mo → 32 Mo, embeddings différés (`docs/PERF.md`).
@@ -37,6 +44,11 @@
 - Classification DGFiP : questionnaires d'activité professionnelle classés `administratif` (2 documents retraités).
 - Doublons questionnaires : vérifiés comme pages différentes (1 page vs 2 pages, contenus OCR distincts, ratio 0,65), aucun dédoublonnage.
 - Documents mobile : filtres type/tri + bascule grille/liste sur une seule ligne à 390 px.
+- Ingestion : 16 tests `pytest` verts sur LXC 105 (validation magic bytes, seuil, registre, endpoints check/candidate, isolation de la queue).
+- Agent testé de bout en bout (LXC 103 → serveur de test LXC 105:8001) : 6 candidats, filtres OK (ZIP, caché, temporaire, trop petit, fausse extension, fichier instable), 3 documents acceptés, 3 mises en attente, refus manuel et acceptation manuelle vérifiés.
+- Juge (éval finale, 97 items = 90 positifs + 7 négatifs, 0 erreur) : tp=89, fn=1, fp=1, tn=6, précision 0,989, rappel 0,989, 7 `pending` (1 positif + 6 négatifs) en validation manuelle, 248,6 s. Seul faux positif : capture d'écran de paramètres acceptée à 0,85 ; le seul faux négatif (`pole emploi.txt`, conf. 0,3) part en revue manuelle.
+- Desktop : `npx tauri build --no-bundle` OK (binaire `desktop/target/release/documind-desktop`) ; lancement sous Xvfb 20 s sans crash ; `cargo check`, `cargo clippy -D warnings` et `cargo fmt` verts sur l'agent.
+- Frontend : `npm run lint`, `npx tsc --noEmit`, `npm run build` verts (16 routes, dont `/sync`).
 
 ## TODO
 - [x] A. Profiling + optimisations mesurées
@@ -50,3 +62,8 @@
 - [x] H. Classification canonique + dédoublonnage + alertes + titres utiles (commit `9f9c26d`)
 - [x] I. UI mobile : navigation, chat, procédures, logs, aperçu document, cibles tactiles 44 px (commit `7493a68`)
 - [x] J. Contrôle visuel desktop final et clôture du brief UI
+- [x] K. Ingestion synchronisée : `file_marks`, check/candidate, juge MiniCPM, validation manuelle, CLI `documind marks`
+- [x] L. Client PC Tauri 2 : écran de connexion, /sync, réglages agent, build Linux
+- [x] M. Agent de synchronisation : filtres, cache SHA-256, service Windows/systemd, test bout en bout
+- [x] N. CI GitHub Actions (frontend, backend, agent) + workflow desktop Windows/Linux et release sur tag
+- [ ] O. Validation visuelle réelle du client Windows (poste utilisateur) et clôture du brief desktop

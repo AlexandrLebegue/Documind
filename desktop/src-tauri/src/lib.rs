@@ -15,6 +15,7 @@ struct AgentConfig {
     folders: Vec<String>,
     interval_minutes: u64,
     enabled: bool,
+    machine: String,
 }
 
 impl Default for AgentConfig {
@@ -24,6 +25,7 @@ impl Default for AgentConfig {
             folders: Vec::new(),
             interval_minutes: 60,
             enabled: false,
+            machine: String::new(),
         }
     }
 }
@@ -120,7 +122,7 @@ fn agent_status_path() -> PathBuf {
     agent_config_path()
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join("status.json")
+        .join("state.json")
 }
 
 fn agent_binary_path() -> Result<PathBuf, String> {

@@ -653,18 +653,29 @@ fn install_service() -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
+        use std::os::unix::fs::PermissionsExt;
+
         let exe = std::env::current_exe().map_err(|err| err.to_string())?;
-        let unit_dir = dirs::home_dir()
-            .ok_or("home introuvable")?
-            .join(".config")
-            .join("systemd")
-            .join("user");
+        let home = dirs::home_dir().ok_or("home introuvable")?;
+        // AppImage extracts the sidecar to a temporary mount: keep a stable copy.
+        let bin_dir = home.join(".local").join("bin");
+        fs::create_dir_all(&bin_dir).map_err(|err| err.to_string())?;
+        let bin = bin_dir.join("documind-agent");
+        if exe != bin {
+            fs::copy(&exe, &bin).map_err(|err| err.to_string())?;
+            let mut perms = fs::metadata(&bin)
+                .map_err(|err| err.to_string())?
+                .permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&bin, perms).map_err(|err| err.to_string())?;
+        }
+        let unit_dir = home.join(".config").join("systemd").join("user");
         fs::create_dir_all(&unit_dir).map_err(|err| err.to_string())?;
         let unit = format!(
             "[Unit]\nDescription=DocuMind folder sync agent\nAfter=network-online.target\n\n\
-             [Service]\nType=simple\nExecStart={} run\nRestart=on-failure\nRestartSec=30\n\n\
+             [Service]\nType=simple\nExecStart=\"{}\" run\nRestart=on-failure\nRestartSec=30\n\n\
              [Install]\nWantedBy=default.target\n",
-            exe.display()
+            bin.display()
         );
         fs::write(unit_dir.join("documind-agent.service"), unit).map_err(|err| err.to_string())?;
         let _ = Command::new("systemctl")
