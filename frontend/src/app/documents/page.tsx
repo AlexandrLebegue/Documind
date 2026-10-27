@@ -8,6 +8,7 @@ import SearchBar from '@/components/SearchBar';
 import DocumentCard from '@/components/DocumentCard';
 import UploadModal from '@/components/UploadModal';
 import { DOC_TYPES } from '@/components/TypeBadge';
+import { toast } from '@/components/Toast';
 
 function DocumentsContent() {
   const searchParams = useSearchParams();
@@ -93,9 +94,9 @@ function DocumentsContent() {
   const hasMore = documents.length < total;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-5 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-[#1a1a1a]">Mes documents</h1>
           <p className="text-sm text-[#6b7280] mt-1">
@@ -111,7 +112,8 @@ function DocumentsContent() {
             <path d="M9 6V12" />
             <path d="M6 9H12" />
           </svg>
-          Ajouter un document
+          <span className="hidden sm:inline">Ajouter un document</span>
+          <span className="sm:hidden">Ajouter</span>
         </button>
       </div>
 
@@ -128,7 +130,7 @@ function DocumentsContent() {
         <select
           value={docType}
           onChange={(e) => setDocType(e.target.value)}
-          className="px-3 py-2 text-sm bg-white border border-beige-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/30"
+          className="min-h-[44px] min-w-0 flex-1 basis-40 px-3 py-2 text-sm bg-white border border-beige-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/30 sm:flex-none"
         >
           <option value="">Tous les types</option>
           {DOC_TYPES.map((t) => (
@@ -142,7 +144,7 @@ function DocumentsContent() {
         <select
           value={sortBy}
           onChange={(e) => setSortBy(e.target.value as 'newest' | 'oldest' | 'name' | 'type')}
-          className="px-3 py-2 text-sm bg-white border border-beige-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/30"
+          className="min-h-[44px] min-w-0 flex-1 basis-36 px-3 py-2 text-sm bg-white border border-beige-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent/30 sm:flex-none"
         >
           <option value="newest">Plus récents</option>
           <option value="oldest">Plus anciens</option>
@@ -157,7 +159,7 @@ function DocumentsContent() {
         <div className="flex bg-white border border-beige-300 rounded-lg overflow-hidden">
           <button
             onClick={() => setView('grid')}
-            className={`p-2 ${view === 'grid' ? 'bg-accent text-white' : 'text-[#6b7280] hover:bg-beige-100'}`}
+            className={`flex h-11 w-11 items-center justify-center ${view === 'grid' ? 'bg-accent text-white' : 'text-[#6b7280] hover:bg-beige-100'}`}
             title="Vue grille"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -169,7 +171,7 @@ function DocumentsContent() {
           </button>
           <button
             onClick={() => setView('list')}
-            className={`p-2 ${view === 'list' ? 'bg-accent text-white' : 'text-[#6b7280] hover:bg-beige-100'}`}
+            className={`flex h-11 w-11 items-center justify-center ${view === 'list' ? 'bg-accent text-white' : 'text-[#6b7280] hover:bg-beige-100'}`}
             title="Vue liste"
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
@@ -240,13 +242,13 @@ function DocumentsContent() {
       {!loading && !error && documents.length > 0 && (
         <>
           {view === 'grid' ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="list-stagger grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
               {documents.map((doc) => (
                 <DocumentCard key={doc.id} document={doc} view="grid" />
               ))}
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="list-stagger space-y-3">
               {documents.map((doc) => (
                 <DocumentCard key={doc.id} document={doc} view="list" />
               ))}
@@ -280,6 +282,7 @@ function DocumentsContent() {
         onClose={() => setUploadOpen(false)}
         onUploadComplete={() => {
           setUploadOpen(false);
+          toast('Documents ajoutés à la file de traitement', 'success');
           fetchDocs(true);
         }}
       />
@@ -290,7 +293,7 @@ function DocumentsContent() {
 export default function DocumentsPage() {
   return (
     <Suspense fallback={
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-5 sm:space-y-6">
         <div className="skeleton h-8 w-48" />
         <div className="skeleton h-12 w-full rounded-xl" />
         <div className="grid grid-cols-3 gap-4">

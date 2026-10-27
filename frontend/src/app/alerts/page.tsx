@@ -6,6 +6,7 @@ import { getAlerts, getRenewalSuggestions, getGapAlerts, dismissAlert } from '@/
 import type { AlertItem, RenewalSuggestion, GapAlert } from '@/lib/api';
 import AlertBadge from '@/components/AlertBadge';
 import TypeBadge from '@/components/TypeBadge';
+import { toast } from '@/components/Toast';
 
 type UrgencyFilter = 'all' | 'critical' | 'warning' | 'info';
 type TypeFilter = 'all' | 'expiration' | 'echeance';
@@ -60,7 +61,7 @@ export default function AlertsPage() {
 
   if (loading) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-6">
         <div className="skeleton h-8 w-48" />
         <div className="grid grid-cols-3 gap-4">
           {[...Array(3)].map((_, i) => (
@@ -77,7 +78,7 @@ export default function AlertsPage() {
 
   if (error) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
           <p className="text-[#dc2626] font-medium">Erreur de chargement</p>
           <p className="text-sm text-[#6b7280] mt-1">{error}</p>
@@ -93,7 +94,7 @@ export default function AlertsPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-[#1a1a1a]">Alertes</h1>
@@ -151,7 +152,7 @@ export default function AlertsPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 bg-beige-100 rounded-lg p-1">
+      <div className="flex gap-1 overflow-x-auto bg-beige-100 rounded-lg p-1">
         {[
           { key: 'alerts' as TabFilter, label: 'Alertes', count: alerts.length },
           { key: 'suggestions' as TabFilter, label: 'Renouvellements', count: suggestions.length },
@@ -160,7 +161,7 @@ export default function AlertsPage() {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`flex-1 py-2 px-3 text-sm font-medium rounded-md transition-colors ${
+            className={`flex-1 whitespace-nowrap py-2.5 px-3 text-sm font-medium rounded-md transition-colors ${
               activeTab === tab.key
                 ? 'bg-white text-[#1a1a1a] shadow-sm'
                 : 'text-[#6b7280] hover:text-[#1a1a1a]'
@@ -240,12 +241,12 @@ export default function AlertsPage() {
                 {filteredAlerts.map((alert) => (
                   <div
                     key={`${alert.alert_type}-${alert.document.id}`}
-                    className="flex items-center gap-4 px-5 py-4 hover:bg-beige-50 transition-colors group"
+                    className="group flex flex-wrap items-center gap-x-3 gap-y-2 px-4 sm:px-5 py-4 hover:bg-beige-50 transition-colors"
                   >
                     {/* Clickable area → document view */}
                     <Link
                       href={`/documents/view?id=${alert.document.id}`}
-                      className="flex items-center gap-4 flex-1 min-w-0"
+                      className="flex min-w-0 flex-1 basis-full items-start gap-3 sm:basis-auto sm:items-center sm:gap-4"
                     >
                       {/* Icon */}
                       <div className={`flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center ${
@@ -274,8 +275,8 @@ export default function AlertsPage() {
 
                       {/* Info */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <p className="text-sm font-medium text-[#1a1a1a] truncate">
+                        <div className="mb-0.5 flex flex-wrap items-center gap-2">
+                          <p className="min-w-0 line-clamp-2 break-words text-sm font-medium text-[#1a1a1a]">
                             {alert.document.title || alert.document.filename}
                           </p>
                           <TypeBadge type={alert.document.doc_type} />
@@ -293,7 +294,7 @@ export default function AlertsPage() {
                     </Link>
 
                     {/* Days remaining + badge */}
-                    <div className="flex-shrink-0 flex items-center gap-3">
+                    <div className="flex flex-shrink-0 items-center gap-2 sm:gap-3">
                       <span className={`text-sm font-semibold ${
                         alert.days_remaining < 0 ? 'text-red-600' :
                         alert.days_remaining <= 7 ? 'text-red-600' :
@@ -329,11 +330,13 @@ export default function AlertsPage() {
                           setAlerts((prev) => prev.filter(
                             (a) => !(a.document.id === alert.document.id && a.alert_type === alert.alert_type)
                           ));
+                          toast('Alerte masquée', 'success');
                         } catch (err) {
                           console.error('Failed to dismiss alert:', err);
+                          toast('Impossible de masquer cette alerte', 'error');
                         }
                       }}
-                      className="flex-shrink-0 p-1.5 rounded-lg text-[#9ca3af] hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
+                      className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg text-[#9ca3af] opacity-100 transition-all hover:bg-red-50 hover:text-red-500 group-hover:opacity-100 sm:opacity-0"
                       title="Supprimer cette alerte"
                     >
                       <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

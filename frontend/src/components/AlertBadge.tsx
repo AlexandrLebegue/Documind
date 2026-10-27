@@ -48,7 +48,39 @@ export default function AlertBadge({ urgency, label, size = 'sm' }: AlertBadgePr
   );
 }
 
-export function ExpiryBadge({ dateExpiration }: { dateExpiration: string }) {
+const EXPIRABLE_TYPES = new Set([
+  'identite', 'sante', 'logement', 'emploi', 'scolarite', 'contrat', 'attestation',
+]);
+
+const LEGACY_TYPE_ALIASES: Record<string, string> = {
+  releve_bancaire: 'banque',
+  bulletin_de_paie: 'fiche_de_paie',
+  bulletin_de_salaire: 'fiche_de_paie',
+  rib: 'banque',
+};
+
+export function isExpirableType(type?: string): boolean {
+  if (!type) return false;
+  return EXPIRABLE_TYPES.has(LEGACY_TYPE_ALIASES[type] || type);
+}
+
+export function isRecentOverdue(dateStr: string, days = 90): boolean {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(dateStr);
+  target.setHours(0, 0, 0, 0);
+  const diff = Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  return diff >= -days;
+}
+
+export function ExpiryBadge({
+  dateExpiration,
+  docType,
+}: {
+  dateExpiration: string;
+  docType?: string;
+}) {
+  if (docType && !isExpirableType(docType)) return null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const expDate = new Date(dateExpiration);
@@ -57,6 +89,7 @@ export function ExpiryBadge({ dateExpiration }: { dateExpiration: string }) {
   const diffMs = expDate.getTime() - today.getTime();
   const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
+  if (daysRemaining < -90) return null;
   if (daysRemaining < 0) {
     return <AlertBadge urgency="critical" label="Expiré" />;
   }
@@ -78,6 +111,7 @@ export function EcheanceBadge({ dateEcheance }: { dateEcheance: string }) {
   const diffMs = echDate.getTime() - today.getTime();
   const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
+  if (daysRemaining < -90) return null;
   if (daysRemaining < 0) {
     return <AlertBadge urgency="critical" label="En retard" />;
   }

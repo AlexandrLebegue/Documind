@@ -11,6 +11,26 @@ interface DocumentCardProps {
   view?: 'grid' | 'list';
 }
 
+function OcrProgress({ document }: { document: Document }) {
+  if (document.status !== 'processing' || !document.pages_total) return null;
+  const done = Math.min(document.pages_done || 0, document.pages_total || 0);
+  const percent = Math.round((done / document.pages_total) * 100);
+  return (
+    <div className="mt-2">
+      <div className="mb-1 flex items-center justify-between text-[10px] text-[#6b7280]">
+        <span>OCR page {done}/{document.pages_total}</span>
+        <span>{percent}%</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-beige-200">
+        <div
+          className="h-full rounded-full bg-accent transition-[width] duration-300"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function DocumentCard({ document, view = 'grid' }: DocumentCardProps) {
   const displayTitle = document.title || document.filename;
 
@@ -24,10 +44,10 @@ export default function DocumentCard({ document, view = 'grid' }: DocumentCardPr
 
   if (view === 'list') {
     return (
-      <Link href={`/documents/view?id=${document.id}`}>
-        <div className="flex items-center gap-4 p-4 bg-white rounded-lg border border-beige-300/50 hover:shadow-md hover:border-beige-300 transition-all cursor-pointer group">
+      <Link href={`/documents/view?id=${document.id}`} className="block min-w-0">
+        <div className="group flex min-w-0 items-start gap-3 rounded-xl border border-beige-300/50 bg-white p-4 transition-all hover:border-beige-300 hover:shadow-md active:scale-[0.995] sm:items-center">
           {/* File icon */}
-          <div className="flex-shrink-0 w-10 h-10 bg-beige-100 rounded-lg flex items-center justify-center text-[#6b7280] group-hover:bg-accent/10 group-hover:text-accent">
+          <div className="hidden h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-beige-100 text-[#6b7280] transition-colors group-hover:bg-accent/10 group-hover:text-accent sm:flex">
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M5 3H12L15 6V17H5V3Z" />
               <path d="M12 3V6H15" />
@@ -35,45 +55,36 @@ export default function DocumentCard({ document, view = 'grid' }: DocumentCardPr
           </div>
 
           {/* Info */}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-[#1a1a1a] truncate">{displayTitle}</p>
-            <p className="text-xs text-[#6b7280] truncate">
-              {document.emetteur && <span>{document.emetteur}</span>}
-              {document.emetteur && formattedDate && <span> · </span>}
-              {formattedDate && <span>{formattedDate}</span>}
+          <div className="min-w-0 flex-1">
+            <p className="line-clamp-2 break-words text-sm font-medium leading-snug text-[#1a1a1a]">
+              {displayTitle}
             </p>
+            {(document.emetteur || formattedDate) && (
+              <p className="mt-0.5 truncate text-xs text-[#6b7280]">
+                {document.emetteur && <span>{document.emetteur}</span>}
+                {document.emetteur && formattedDate && <span> · </span>}
+                {formattedDate && <span>{formattedDate}</span>}
+              </p>
+            )}
+
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <TypeBadge type={document.doc_type} />
+              {document.date_expiration && (
+                <ExpiryBadge dateExpiration={document.date_expiration} docType={document.doc_type} />
+              )}
+              {document.date_echeance && (
+                <EcheanceBadge dateEcheance={document.date_echeance} />
+              )}
+              {document.status !== 'ready' && <StatusBadge status={document.status} />}
+              {formattedMontant && (
+                <span className="ml-auto whitespace-nowrap text-sm font-semibold text-[#1a1a1a]">
+                  {formattedMontant}
+                </span>
+              )}
+            </div>
+
+            <OcrProgress document={document} />
           </div>
-
-          {/* Type */}
-          <div className="flex-shrink-0">
-            <TypeBadge type={document.doc_type} />
-          </div>
-
-          {/* Expiry / Echeance badges */}
-          {document.date_expiration && (
-            <div className="flex-shrink-0">
-              <ExpiryBadge dateExpiration={document.date_expiration} />
-            </div>
-          )}
-          {document.date_echeance && (
-            <div className="flex-shrink-0">
-              <EcheanceBadge dateEcheance={document.date_echeance} />
-            </div>
-          )}
-
-          {/* Montant */}
-          {formattedMontant && (
-            <div className="flex-shrink-0 text-sm font-semibold text-[#1a1a1a]">
-              {formattedMontant}
-            </div>
-          )}
-
-          {/* Status */}
-          {document.status !== 'ready' && (
-            <div className="flex-shrink-0">
-              <StatusBadge status={document.status} />
-            </div>
-          )}
         </div>
       </Link>
     );
@@ -81,39 +92,45 @@ export default function DocumentCard({ document, view = 'grid' }: DocumentCardPr
 
   // Grid view
   return (
-    <Link href={`/documents/view?id=${document.id}`}>
-      <div className="bg-white rounded-xl border border-beige-300/50 p-4 hover:shadow-lg hover:border-beige-300 hover:-translate-y-0.5 transition-all cursor-pointer h-full flex flex-col">
-        {/* Header row: type badge + status + expiry */}
-        <div className="flex items-center justify-between mb-3 gap-1 flex-wrap">
+    <Link href={`/documents/view?id=${document.id}`} className="block min-w-0">
+      <div className="group flex h-full min-h-[150px] min-w-0 flex-col rounded-xl border border-beige-300/50 bg-white p-4 transition-all hover:-translate-y-0.5 hover:border-beige-300 hover:shadow-lg active:scale-[0.99]">
+        {/* Badges first: they wrap instead of squeezing the title */}
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
           <TypeBadge type={document.doc_type} />
-          <div className="flex items-center gap-1">
-            {document.date_expiration && <ExpiryBadge dateExpiration={document.date_expiration} />}
-            {document.date_echeance && <EcheanceBadge dateEcheance={document.date_echeance} />}
-            {document.status !== 'ready' && <StatusBadge status={document.status} />}
-          </div>
+          {document.date_expiration && (
+            <ExpiryBadge dateExpiration={document.date_expiration} docType={document.doc_type} />
+          )}
+          {document.date_echeance && (
+            <EcheanceBadge dateEcheance={document.date_echeance} />
+          )}
+          {document.status !== 'ready' && <StatusBadge status={document.status} />}
         </div>
 
-        {/* Title */}
-        <h3 className="text-sm font-semibold text-[#1a1a1a] truncate mb-1">{displayTitle}</h3>
+        {/* Title on its own line */}
+        <h3 className="line-clamp-2 break-words text-sm font-semibold leading-snug text-[#1a1a1a]">
+          {displayTitle}
+        </h3>
 
         {/* Emetteur + date */}
-        <p className="text-xs text-[#6b7280] mb-2">
-          {document.emetteur && <span>{document.emetteur}</span>}
-          {document.emetteur && formattedDate && <span> · </span>}
-          {formattedDate && <span>{formattedDate}</span>}
-        </p>
+        {(document.emetteur || formattedDate) && (
+          <p className="mt-1 truncate text-xs text-[#6b7280]">
+            {document.emetteur && <span>{document.emetteur}</span>}
+            {document.emetteur && formattedDate && <span> · </span>}
+            {formattedDate && <span>{formattedDate}</span>}
+          </p>
+        )}
 
-        {/* Resume */}
         {document.resume && (
-          <p className="text-xs text-[#6b7280] line-clamp-2 mb-3 flex-1">
+          <p className="mt-2 line-clamp-2 flex-1 text-xs leading-relaxed text-[#6b7280]">
             {document.resume}
           </p>
         )}
         {!document.resume && <div className="flex-1" />}
 
-        {/* Footer: montant */}
+        <OcrProgress document={document} />
+
         {formattedMontant && (
-          <div className="pt-2 border-t border-beige-200">
+          <div className="mt-3 border-t border-beige-200 pt-2">
             <span className="text-sm font-semibold text-[#1a1a1a]">{formattedMontant}</span>
           </div>
         )}

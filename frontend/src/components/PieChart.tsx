@@ -1,34 +1,66 @@
 const TYPE_COLORS: Record<string, string> = {
   facture: '#2E75B6',
   fiche_de_paie: '#059669',
+  avis_imposition: '#0891b2',
   contrat: '#7c3aed',
   attestation: '#d97706',
   courrier: '#dc2626',
-  avis_imposition: '#0891b2',
-  releve_bancaire: '#be185d',
+  banque: '#be185d',
   quittance: '#4f46e5',
+  identite: '#0d9488',
+  scolarite: '#b45309',
+  sante: '#be123c',
+  logement: '#4d7c0f',
+  emploi: '#4338ca',
+  administratif: '#475569',
   autre: '#6b7280',
 };
 
 const TYPE_LABELS: Record<string, string> = {
   facture: 'Facture',
-  fiche_de_paie: 'Fiche de paie',
+  fiche_de_paie: 'Bulletin de paie',
+  avis_imposition: 'Avis d\'imposition',
   contrat: 'Contrat',
   attestation: 'Attestation',
   courrier: 'Courrier',
-  avis_imposition: 'Avis d\'imposition',
-  releve_bancaire: 'Relevé bancaire',
+  banque: 'Banque',
   quittance: 'Quittance',
+  identite: 'Identité',
+  scolarite: 'Scolarité',
+  sante: 'Santé',
+  logement: 'Logement',
+  emploi: 'Emploi',
+  administratif: 'Administratif',
   autre: 'Autre',
 };
+
+const LEGACY_ALIASES: Record<string, string> = {
+  releve_bancaire: 'banque',
+  bulletin_de_paie: 'fiche_de_paie',
+  bulletin_de_salaire: 'fiche_de_paie',
+  rib: 'banque',
+  cni: 'identite',
+  passeport: 'identite',
+};
+
+function resolveType(type: string): string {
+  return LEGACY_ALIASES[type] || type;
+}
 
 interface PieChartProps {
   data: Record<string, number>;
 }
 
 export default function PieChart({ data }: PieChartProps) {
-  const entries = Object.entries(data).filter(([, count]) => count > 0);
-  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+  const entries = Object.entries(data)
+    .filter(([, count]) => count > 0)
+    .map(([type, count]) => [resolveType(type), count] as [string, number])
+    .reduce<Record<string, number>>((acc, [type, count]) => {
+      acc[type] = (acc[type] || 0) + count;
+      return acc;
+    }, {});
+  const pieEntries = Object.entries(entries);
+  const total = pieEntries.reduce((sum, [, count]) => sum + count, 0);
 
   if (total === 0) {
     return (
@@ -48,7 +80,7 @@ export default function PieChart({ data }: PieChartProps) {
   const radius = 60;
   let currentAngle = -Math.PI / 2; // Start from top
 
-  const slices = entries.map(([type, count]) => {
+  const slices = pieEntries.map(([type, count]) => {
     const angle = (count / total) * 2 * Math.PI;
     const startAngle = currentAngle;
     const endAngle = currentAngle + angle;
@@ -62,7 +94,7 @@ export default function PieChart({ data }: PieChartProps) {
     const largeArc = angle > Math.PI ? 1 : 0;
 
     // For single-entry case, draw a circle
-    if (entries.length === 1) {
+    if (pieEntries.length === 1) {
       return {
         type,
         count,

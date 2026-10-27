@@ -64,10 +64,10 @@ export default function ProceduresPage() {
   const hasMore = procedures.length < total;
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-5 sm:space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-[#1a1a1a]">Mes procédures</h1>
           <p className="text-sm text-[#6b7280] mt-1">
             {total} procédure{total !== 1 ? 's' : ''}
@@ -75,14 +75,15 @@ export default function ProceduresPage() {
         </div>
         <Link
           href="/procedures/new"
-          className="flex items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium transition-colors"
+          className="flex min-h-[44px] items-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium transition-colors"
         >
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <circle cx="9" cy="9" r="7" />
             <path d="M9 6V12" />
             <path d="M6 9H12" />
           </svg>
-          Nouvelle procédure
+          <span className="hidden sm:inline">Nouvelle procédure</span>
+          <span className="sm:hidden">Nouvelle</span>
         </Link>
       </div>
 
@@ -91,7 +92,7 @@ export default function ProceduresPage() {
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value)}
-          className="px-3 py-2 bg-white border border-beige-300 rounded-lg text-sm text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-accent/30"
+          className="min-h-[44px] w-full px-3 py-2 bg-white border border-beige-300 rounded-lg text-sm text-[#1a1a1a] focus:outline-none focus:ring-2 focus:ring-accent/30 sm:w-auto"
         >
           <option value="">Tous les types</option>
           {PROCEDURE_TYPES.map((t) => (

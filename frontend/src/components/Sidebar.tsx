@@ -98,14 +98,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         {/* Logo + Close button (mobile) */}
         <div className="px-5 py-6 border-b border-beige-300 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-3" onClick={onClose}>
-            <div className="w-9 h-9 bg-accent rounded-lg flex items-center justify-center">
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 3H12L15 6V17H5V3Z" />
-                <path d="M12 3V6H15" />
-                <path d="M7 10H13" />
-                <path d="M7 13H11" />
-              </svg>
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/icon-192.png" alt="" className="w-9 h-9 rounded-xl object-cover shadow-sm" />
             <span className="text-lg font-bold text-[#1a1a1a]">DocuMind</span>
           </Link>
           {/* Close button - mobile only */}
@@ -128,7 +122,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               key={item.href}
               href={item.href}
               onClick={onClose}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`flex min-h-[44px] items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors active:scale-[0.99] ${
                 isActive(item.href)
                   ? 'bg-accent text-white'
                   : 'text-[#1a1a1a] hover:bg-beige-300/60'
@@ -151,7 +145,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           <Link
             href="/logs"
             onClick={onClose}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex min-h-[44px] items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/logs')
                 ? 'bg-accent text-white'
                 : 'text-[#6b7280] hover:text-[#1a1a1a] hover:bg-beige-300/60'
@@ -170,7 +164,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           <Link
             href="/settings"
             onClick={onClose}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex min-h-[44px] items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
               isActive('/settings')
                 ? 'bg-accent text-white'
                 : 'text-[#6b7280] hover:text-[#1a1a1a] hover:bg-beige-300/60'
@@ -193,7 +187,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           {/* Upload Button */}
           <button
             onClick={() => setUploadOpen(true)}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium transition-colors"
+            className="w-full flex min-h-[44px] items-center justify-center gap-2 px-4 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium transition-colors active:scale-[0.99]"
           >
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <circle cx="9" cy="9" r="7" />

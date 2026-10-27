@@ -71,7 +71,7 @@ function ProcedureDetailContent() {
 
   if (loading) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-5 sm:space-y-6">
         <div className="skeleton h-8 w-64 rounded-lg" />
         <div className="skeleton h-4 w-96 rounded-lg" />
         <div className="space-y-3">
@@ -85,7 +85,7 @@ function ProcedureDetailContent() {
 
   if (error || !procedure) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-sm text-[#dc2626]">{error || 'Procédure non trouvée'}</p>
         </div>
@@ -97,11 +97,11 @@ function ProcedureDetailContent() {
   const totalRequired = procedure.required_documents.length;
 
   return (
-    <div className="p-6 space-y-6 max-w-4xl">
+    <div className="p-4 sm:p-6 space-y-6 max-w-4xl">
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-2">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={() => router.push('/procedures')}
               className="p-1.5 rounded-lg text-[#6b7280] hover:text-[#1a1a1a] hover:bg-beige-300/60 transition-colors"
@@ -111,9 +111,9 @@ function ProcedureDetailContent() {
                 <path d="M10 5L5 10L10 15" />
               </svg>
             </button>
-            <h1 className="text-2xl font-bold text-[#1a1a1a]">{procedure.name}</h1>
+            <h1 className="min-w-0 break-words text-xl font-bold text-[#1a1a1a] sm:text-2xl">{procedure.name}</h1>
           </div>
-          <div className="flex items-center gap-3 ml-10">
+          <div className="ml-9 flex flex-wrap items-center gap-2 sm:ml-10 sm:gap-3">
             <ProcedureTypeBadge type={procedure.procedure_type} />
             <span className="text-sm text-[#6b7280]">
               Créée le {new Date(procedure.created_at).toLocaleDateString('fr-FR', {
@@ -179,9 +179,9 @@ function ProcedureDetailContent() {
                 {i + 1}
               </span>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
                   <TypeBadge type={doc.doc_type} />
-                  <span className="text-sm font-medium text-[#1a1a1a]">{doc.label}</span>
+                  <span className="min-w-0 break-words text-sm font-medium text-[#1a1a1a]">{doc.label}</span>
                 </div>
                 {doc.description && (
                   <p className="text-xs text-[#6b7280]">{doc.description}</p>
@@ -215,7 +215,7 @@ function ProcedureDetailContent() {
               </p>
             </div>
 
-            <div className="flex gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row">
               <input
                 type="text"
                 value={personName}
@@ -224,13 +224,13 @@ function ProcedureDetailContent() {
                   if (e.key === 'Enter') handleExecute();
                 }}
                 placeholder="Nom et prénom de la personne..."
-                className="flex-1 px-4 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#6b7280] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
+                className="min-h-[44px] flex-1 px-4 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#6b7280] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent"
                 disabled={executing}
               />
               <button
                 onClick={handleExecute}
                 disabled={!personName.trim() || executing}
-                className="px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                className="flex min-h-[44px] items-center justify-center gap-2 px-5 py-2.5 bg-accent hover:bg-accent-hover text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {executing ? (
                   <>
@@ -419,7 +419,7 @@ function MatchedDocumentRow({ match }: { match: MatchedDocument }) {
 export default function ProcedureViewPage() {
   return (
     <Suspense fallback={
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-5 sm:space-y-6">
         <div className="skeleton h-8 w-64 rounded-lg" />
         <div className="skeleton h-4 w-96 rounded-lg" />
         <div className="space-y-3">

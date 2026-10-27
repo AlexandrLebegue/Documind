@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from 'react';
 import { uploadDocument } from '@/lib/api';
+import { toast } from './Toast';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -102,6 +103,7 @@ export default function UploadModal({ isOpen, onClose, onUploadComplete }: Uploa
     const allDone = updatedFiles.every((f) => f.status === 'done' || f.status === 'error');
     const anyDone = updatedFiles.some((f) => f.status === 'done');
     if (allDone && anyDone) {
+      toast('Documents ajoutés à la file de traitement', 'success');
       onUploadComplete();
     }
   };
@@ -124,9 +126,9 @@ export default function UploadModal({ isOpen, onClose, onUploadComplete }: Uploa
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={handleClose}>
+    <div className="animate-fade-in fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onClick={handleClose}>
       <div
-        className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col"
+        className="animate-scale-in bg-white rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-lg max-h-[85dvh] sm:max-h-[80vh] flex flex-col safe-bottom"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

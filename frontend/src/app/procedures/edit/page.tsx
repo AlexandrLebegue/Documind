@@ -124,7 +124,7 @@ function ProcedureEditContent() {
 
   if (loading) {
     return (
-      <div className="p-6 space-y-6 max-w-4xl">
+      <div className="p-4 sm:p-6 space-y-6 max-w-4xl">
         <div className="skeleton h-8 w-64 rounded-lg" />
         <div className="skeleton h-12 rounded-xl" />
         <div className="skeleton h-12 rounded-xl" />
@@ -140,7 +140,7 @@ function ProcedureEditContent() {
 
   if (error && !name) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-sm text-[#dc2626]">{error}</p>
         </div>
@@ -149,7 +149,7 @@ function ProcedureEditContent() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-4xl">
+    <div className="p-4 sm:p-6 space-y-6 max-w-4xl">
       {/* Header */}
       <div className="flex items-center gap-3">
         <button
@@ -379,7 +379,7 @@ export default function ProcedureEditPage() {
   return (
     <Suspense
       fallback={
-        <div className="p-6 space-y-6 max-w-4xl">
+        <div className="p-4 sm:p-6 space-y-6 max-w-4xl">
           <div className="skeleton h-8 w-64 rounded-lg" />
           <div className="skeleton h-12 rounded-xl" />
           <div className="skeleton h-12 rounded-xl" />

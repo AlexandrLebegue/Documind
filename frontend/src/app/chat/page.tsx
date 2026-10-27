@@ -12,6 +12,7 @@ import {
 } from '@/lib/api';
 import type { ChatMessage as ChatMessageType, ChatSession, ToolCallLog } from '@/lib/api';
 import ChatMessage from '@/components/ChatMessage';
+import { toast } from '@/components/Toast';
 
 const TOOL_LABELS: Record<string, string> = {
   recherche_web: 'Recherche web',
@@ -87,6 +88,7 @@ export default function ChatPage() {
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Load sessions on mount
@@ -131,10 +133,21 @@ export default function ChatPage() {
     }
   }, [activeSessionId, loadMessages]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll: the newest message always sits at the bottom.
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'smooth') => {
+    requestAnimationFrame(() => {
+      const container = scrollContainerRef.current;
+      if (container) {
+        container.scrollTo({ top: container.scrollHeight, behavior });
+      } else {
+        messagesEndRef.current?.scrollIntoView({ behavior });
+      }
+    });
+  }, []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    scrollToBottom(messages.length > 1 ? 'smooth' : 'auto');
+  }, [messages, sending, liveTools, scrollToBottom]);
 
   // Focus rename input when editing
   useEffect(() => {
@@ -324,7 +337,9 @@ export default function ChatPage() {
           );
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Erreur lors de l'envoi du message");
+        const message = err instanceof Error ? err.message : "Erreur lors de l'envoi du message";
+        setError(message);
+        toast(message, 'error');
         setMessages((prev) => prev.filter((m) => m.id !== userMessage.id));
         setInput(trimmed);
       } finally {
@@ -353,7 +368,7 @@ export default function ChatPage() {
   // ── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] md:h-screen">
+    <div className="flex min-h-0 h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] md:h-screen">
       {/* ── Sessions sidebar ─────────────────────────────────────────── */}
 
       {/* Mobile overlay */}
@@ -365,7 +380,7 @@ export default function ChatPage() {
       )}
 
       <aside
-        className={`fixed md:relative z-40 md:z-auto w-72 md:w-64 h-full bg-beige-100 border-r border-beige-300 flex flex-col transform transition-transform duration-300 ease-in-out ${
+        className={`safe-top fixed md:relative z-40 md:z-auto w-72 md:w-64 h-full bg-beige-100 border-r border-beige-300 flex flex-col transform transition-transform duration-300 ease-in-out ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         } md:translate-x-0`}
       >
@@ -374,10 +389,12 @@ export default function ChatPage() {
           <span className="text-sm font-semibold text-[#1a1a1a]">
             Conversations
           </span>
+          <div className="flex items-center gap-1">
           <button
             onClick={handleNewConversation}
-            className="p-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white transition-colors"
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent hover:bg-accent-hover text-white transition-colors"
             title="Nouvelle conversation"
+            aria-label="Nouvelle conversation"
           >
             <svg
               width="16"
@@ -392,6 +409,17 @@ export default function ChatPage() {
               <path d="M3 8H13" />
             </svg>
           </button>
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-[#6b7280] hover:bg-beige-300/60 transition-colors md:hidden"
+            aria-label="Fermer les conversations"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M4 4L14 14" />
+              <path d="M14 4L4 14" />
+            </svg>
+          </button>
+          </div>
         </div>
 
         {/* Sessions list */}
@@ -501,25 +529,17 @@ export default function ChatPage() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
         <div className="flex-shrink-0 px-4 md:px-6 py-3 border-b border-beige-300 bg-white/50 backdrop-blur-sm flex items-center gap-3">
-          {/* Mobile sidebar toggle */}
+          {/* Mobile conversations list toggle (not a second navigation menu) */}
           <button
             onClick={() => setSidebarOpen(true)}
-            className="p-1.5 rounded-lg text-[#6b7280] hover:text-[#1a1a1a] hover:bg-beige-200 transition-colors md:hidden"
-            aria-label="Ouvrir les conversations"
+            className="flex min-h-[44px] items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-[#6b7280] transition-colors hover:bg-beige-200 hover:text-[#1a1a1a] md:hidden"
+            aria-label="Afficher les conversations"
           >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 20 20"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            >
-              <path d="M3 5H17" />
-              <path d="M3 10H17" />
-              <path d="M3 15H17" />
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 4V9L12 11" />
+              <circle cx="9" cy="9" r="7" />
             </svg>
+            <span>Conversations</span>
           </button>
 
           <div className="flex-1 min-w-0">
@@ -565,7 +585,7 @@ export default function ChatPage() {
         </div>
 
         {/* Messages area */}
-        <div className="flex-1 overflow-auto px-4 md:px-6 py-4">
+        <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-4 sm:px-6">
           {loading ? (
             <div className="space-y-4">
               {[...Array(3)].map((_, i) => (
@@ -633,7 +653,7 @@ export default function ChatPage() {
               </div>
             </div>
           ) : (
-            <>
+            <div className="flex min-h-full flex-col justify-end">
               {messages.map((msg) => (
                 <ChatMessage key={msg.id} message={msg} />
               ))}
@@ -686,7 +706,7 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
-            </>
+            </div>
           )}
           <div ref={messagesEndRef} />
         </div>
@@ -699,7 +719,7 @@ export default function ChatPage() {
         )}
 
         {/* Input area */}
-        <div className="flex-shrink-0 px-4 md:px-6 py-4 border-t border-beige-300 bg-white/50 backdrop-blur-sm">
+        <div className="safe-bottom flex-shrink-0 border-t border-beige-300 bg-white/80 px-3 pt-3 backdrop-blur-sm sm:px-6 sm:py-4">
           {/* Agent mode toggle */}
           <div className="flex items-center justify-end max-w-4xl mx-auto mb-2">
             <button
@@ -748,14 +768,14 @@ export default function ChatPage() {
                 }
                 disabled={sending}
                 rows={1}
-                className="w-full px-4 py-3 bg-white border border-beige-300 rounded-xl text-sm text-[#1a1a1a] placeholder-[#6b7280] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent resize-none disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full px-4 py-3 bg-white border border-beige-300 rounded-xl text-base text-[#1a1a1a] placeholder-[#6b7280] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent resize-none disabled:opacity-50 disabled:cursor-not-allowed sm:text-sm"
                 style={{ minHeight: '44px', maxHeight: '120px' }}
               />
             </div>
             <button
               onClick={handleSend}
               disabled={!input.trim() || sending}
-              className="flex-shrink-0 w-11 h-11 bg-accent hover:bg-accent-hover text-white rounded-xl flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-accent text-white transition-colors hover:bg-accent-hover active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 sm:h-11 sm:w-11"
             >
               {sending ? (
                 <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />

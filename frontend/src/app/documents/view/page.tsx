@@ -7,7 +7,8 @@ import { getDocument, updateDocument, deleteDocument, reprocessDocument, getDocu
 import type { Document } from '@/lib/api';
 import StatusBadge from '@/components/StatusBadge';
 import MetadataEditor from '@/components/MetadataEditor';
-import { ExpiryBadge, EcheanceBadge } from '@/components/AlertBadge';
+import { ExpiryBadge, EcheanceBadge, isExpirableType } from '@/components/AlertBadge';
+import { toast } from '@/components/Toast';
 
 function DocumentDetailContent() {
   const searchParams = useSearchParams();
@@ -45,8 +46,9 @@ function DocumentDetailContent() {
     try {
       const updated = await updateDocument(id, updates);
       setDoc(updated);
+      toast('Métadonnées enregistrées', 'success');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Erreur lors de la sauvegarde');
+      toast(err instanceof Error ? err.message : 'Erreur lors de la sauvegarde', 'error');
     }
   };
 
@@ -56,8 +58,9 @@ function DocumentDetailContent() {
       await reprocessDocument(id);
       const refreshed = await getDocument(id);
       setDoc(refreshed);
+      toast('Re-analyse lancée', 'success');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Erreur lors du retraitement');
+      toast(err instanceof Error ? err.message : 'Erreur lors du retraitement', 'error');
     } finally {
       setReprocessing(false);
     }
@@ -67,20 +70,21 @@ function DocumentDetailContent() {
     setDeleting(true);
     try {
       await deleteDocument(id);
+      toast('Document supprimé', 'success');
       router.push('/documents');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Erreur lors de la suppression');
+      toast(err instanceof Error ? err.message : 'Erreur lors de la suppression', 'error');
       setDeleting(false);
     }
   };
 
   if (loading) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="skeleton h-6 w-32 mb-6" />
-        <div className="grid grid-cols-5 gap-6">
-          <div className="col-span-3 skeleton h-96 rounded-xl" />
-          <div className="col-span-2 space-y-4">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+          <div className="skeleton h-96 rounded-xl lg:col-span-3" />
+          <div className="space-y-4 lg:col-span-2">
             <div className="skeleton h-8 w-full" />
             {[...Array(7)].map((_, i) => (
               <div key={i} className="skeleton h-10 w-full" />
@@ -93,7 +97,7 @@ function DocumentDetailContent() {
 
   if (error || !doc) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
           <p className="text-[#dc2626] font-medium">Document introuvable</p>
           <p className="text-sm text-[#6b7280] mt-1">{error || 'Le document demandé n\'existe pas'}</p>
@@ -120,11 +124,11 @@ function DocumentDetailContent() {
   const fileUrl = getDocumentFileUrl(doc.id);
 
   return (
-    <div className="p-6">
+    <div className="p-4 sm:p-6">
       {/* Back button */}
       <button
         onClick={() => router.push('/documents')}
-        className="flex items-center gap-1.5 text-sm text-[#6b7280] hover:text-[#1a1a1a] mb-4 transition-colors"
+        className="mb-4 flex min-h-[44px] items-center gap-1.5 text-sm text-[#6b7280] transition-colors hover:text-[#1a1a1a]"
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
           <path d="M10 3L5 8L10 13" />
@@ -133,40 +137,40 @@ function DocumentDetailContent() {
         </button>
   
         {/* Expiry / Echeance alert banner */}
-        {doc.date_expiration && (() => {
+        {doc.date_expiration && isExpirableType(doc.doc_type) && (() => {
           const today = new Date();
           today.setHours(0, 0, 0, 0);
           const expDate = new Date(doc.date_expiration);
           expDate.setHours(0, 0, 0, 0);
           const daysRem = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-          if (daysRem <= 30) {
+          if (daysRem <= 30 && daysRem >= -90) {
             const isOverdue = daysRem < 0;
             return (
-              <div className={`mb-4 rounded-xl border p-4 flex items-center justify-between ${
+              <div className={`mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-4 ${
                 isOverdue || daysRem <= 7
                   ? 'bg-red-50 border-red-200'
                   : 'bg-amber-50 border-amber-200'
               }`}>
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 items-center gap-3">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isOverdue || daysRem <= 7 ? '#dc2626' : '#d97706'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 3L21 19H3L12 3Z" />
                     <path d="M12 10V14" />
                     <circle cx="12" cy="17" r="0.5" fill={isOverdue || daysRem <= 7 ? '#dc2626' : '#d97706'} />
                   </svg>
-                  <div>
+                  <div className="min-w-0">
                     <p className={`text-sm font-medium ${isOverdue || daysRem <= 7 ? 'text-red-800' : 'text-amber-800'}`}>
                       {isOverdue
                         ? `Ce document a expiré il y a ${Math.abs(daysRem)} jours`
                         : `Ce document expire dans ${daysRem} jours`}
                     </p>
-                    <p className={`text-xs ${isOverdue || daysRem <= 7 ? 'text-red-600' : 'text-amber-600'}`}>
+                    <p className={`break-words text-xs ${isOverdue || daysRem <= 7 ? 'text-red-600' : 'text-amber-600'}`}>
                       Date d&apos;expiration : {expDate.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}
                     </p>
                   </div>
                 </div>
                 <Link
                   href="/alerts"
-                  className={`text-xs font-medium px-3 py-1.5 rounded-lg ${
+                  className={`min-h-[36px] flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium ${
                     isOverdue || daysRem <= 7
                       ? 'bg-red-100 text-red-700 hover:bg-red-200'
                       : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
@@ -186,7 +190,7 @@ function DocumentDetailContent() {
           const echDate = new Date(doc.date_echeance);
           echDate.setHours(0, 0, 0, 0);
           const daysRem = Math.ceil((echDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-          if (daysRem <= 30) {
+          if (daysRem <= 30 && daysRem >= -90) {
             const isOverdue = daysRem < 0;
             return (
               <div className={`mb-4 rounded-xl border p-4 flex items-center gap-3 ${
@@ -333,8 +337,8 @@ function DocumentDetailContent() {
         <div className="lg:col-span-2 space-y-6">
           {/* Document title and status */}
           <div className="bg-white rounded-xl border border-beige-300/50 p-5">
-            <div className="flex items-start justify-between mb-2">
-              <h2 className="text-lg font-bold text-[#1a1a1a] break-all pr-4">{doc.title || doc.filename}</h2>
+            <div className="mb-2 flex items-start justify-between gap-2">
+              <h2 className="min-w-0 break-words pr-2 text-lg font-bold text-[#1a1a1a]">{doc.title || doc.filename}</h2>
               <StatusBadge status={doc.status} />
             </div>
             {doc.title && (
@@ -358,7 +362,7 @@ function DocumentDetailContent() {
             <button
               onClick={handleReprocess}
               disabled={reprocessing}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-beige-300 rounded-lg text-sm font-medium text-[#1a1a1a] hover:bg-beige-50 disabled:opacity-50 transition-colors"
+              className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-beige-300 bg-white px-4 py-2.5 text-sm font-medium text-[#1a1a1a] transition-colors hover:bg-beige-50 disabled:opacity-50"
             >
               {reprocessing ? (
                 <>
@@ -381,7 +385,7 @@ function DocumentDetailContent() {
             {!confirmDelete ? (
               <button
                 onClick={() => setConfirmDelete(true)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-red-200 rounded-lg text-sm font-medium text-[#dc2626] hover:bg-red-50 transition-colors"
+                className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-medium text-[#dc2626] transition-colors hover:bg-red-50"
               >
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 5H13" />
@@ -398,14 +402,14 @@ function DocumentDetailContent() {
                 <div className="flex gap-2">
                   <button
                     onClick={() => setConfirmDelete(false)}
-                    className="flex-1 px-3 py-2 text-sm bg-white border border-beige-300 rounded-lg hover:bg-beige-50"
+                    className="min-h-[44px] flex-1 rounded-lg border border-beige-300 bg-white px-3 py-2 text-sm hover:bg-beige-50"
                   >
                     Annuler
                   </button>
                   <button
                     onClick={handleDelete}
                     disabled={deleting}
-                    className="flex-1 px-3 py-2 text-sm bg-[#dc2626] text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+                    className="min-h-[44px] flex-1 rounded-lg bg-[#dc2626] px-3 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-50"
                   >
                     {deleting ? 'Suppression...' : 'Confirmer'}
                   </button>
@@ -422,11 +426,11 @@ function DocumentDetailContent() {
 export default function DocumentViewPage() {
   return (
     <Suspense fallback={
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="skeleton h-6 w-32 mb-6" />
-        <div className="grid grid-cols-5 gap-6">
-          <div className="col-span-3 skeleton h-96 rounded-xl" />
-          <div className="col-span-2 space-y-4">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+          <div className="skeleton h-96 rounded-xl lg:col-span-3" />
+          <div className="space-y-4 lg:col-span-2">
             <div className="skeleton h-8 w-full" />
             {[...Array(7)].map((_, i) => (
               <div key={i} className="skeleton h-10 w-full" />

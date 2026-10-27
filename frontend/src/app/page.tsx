@@ -10,6 +10,7 @@ import StatsCards from '@/components/StatsCards';
 import DocumentCard from '@/components/DocumentCard';
 import PieChart from '@/components/PieChart';
 import AlertBadge from '@/components/AlertBadge';
+import { toast } from '@/components/Toast';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -47,7 +48,7 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-4 sm:p-6 space-y-6">
         {/* Skeleton header */}
         <div className="space-y-2">
           <div className="skeleton h-8 w-48" />
@@ -76,7 +77,7 @@ export default function DashboardPage() {
 
   if (error) {
     return (
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
           <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="#dc2626" strokeWidth="1.5" strokeLinecap="round" className="mx-auto mb-3">
             <circle cx="20" cy="20" r="16" />
@@ -97,7 +98,7 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 sm:p-6 space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-[#1a1a1a]">Tableau de bord</h1>
@@ -117,8 +118,8 @@ export default function DashboardPage() {
       {/* Expiring Soon Widget */}
       {alerts.length > 0 && (
         <div className="bg-white rounded-xl border border-amber-200 shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3 bg-amber-50 border-b border-amber-200">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3 bg-amber-50 border-b border-amber-200">
+            <div className="flex items-center gap-2 min-w-0">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 3L21 19H3L12 3Z" />
                 <path d="M12 10V14" />
@@ -134,13 +135,13 @@ export default function DashboardPage() {
             {alerts.slice(0, 5).map((alert) => (
               <div
                 key={`${alert.alert_type}-${alert.document.id}`}
-                className="flex items-center gap-4 px-5 py-3 hover:bg-beige-50 transition-colors group"
+                className="group flex flex-wrap items-center gap-x-3 gap-y-2 px-4 sm:px-5 py-3 hover:bg-beige-50 transition-colors"
               >
                 <Link
                   href={`/documents/view?id=${alert.document.id}`}
-                  className="flex-1 min-w-0"
+                  className="min-w-0 flex-1 basis-full sm:basis-auto"
                 >
-                  <p className="text-sm font-medium text-[#1a1a1a] truncate">
+                  <p className="line-clamp-2 break-words text-sm font-medium text-[#1a1a1a]">
                     {alert.document.title || alert.document.filename}
                   </p>
                   <p className="text-xs text-[#6b7280]">
@@ -176,8 +177,10 @@ export default function DashboardPage() {
                       setAlerts((prev) => prev.filter(
                         (a) => !(a.document.id === alert.document.id && a.alert_type === alert.alert_type)
                       ));
+                      toast('Alerte masquée', 'success');
                     } catch (err) {
                       console.error('Failed to dismiss alert:', err);
+                      toast('Impossible de masquer cette alerte', 'error');
                     }
                   }}
                   className="flex-shrink-0 p-1 rounded-md text-[#9ca3af] hover:text-red-500 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-all"
@@ -200,7 +203,7 @@ export default function DashboardPage() {
         <div className="lg:col-span-2">
           <h2 className="text-lg font-semibold text-[#1a1a1a] mb-4">Documents récents</h2>
           {stats?.recent_documents && stats.recent_documents.length > 0 ? (
-            <div className="space-y-3">
+            <div className="list-stagger space-y-3">
               {stats.recent_documents.slice(0, 10).map((doc) => (
                 <DocumentCard key={doc.id} document={doc} view="list" />
               ))}

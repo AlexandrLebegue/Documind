@@ -49,10 +49,10 @@ export default function LogsPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-zinc-950 text-zinc-100 p-4 gap-3">
+    <div className="flex h-[calc(100dvh-3.5rem-env(safe-area-inset-top))] flex-col gap-3 bg-zinc-950 p-3 text-zinc-100 sm:p-4 md:h-screen">
       {/* Header */}
-      <div className="flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
           <h1 className="text-lg font-semibold">Logs backend</h1>
           <span className={`flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full ${
             connected ? 'bg-green-900/40 text-green-400' : 'bg-red-900/40 text-red-400'
@@ -89,7 +89,7 @@ export default function LogsPage() {
           <p className="text-zinc-600 italic">En attente de logs...</p>
         ) : (
           lines.map((line, i) => (
-            <div key={i} className={colorLine(line)}>
+            <div key={i} className={`break-words whitespace-pre-wrap ${colorLine(line)}`}>
               {line}
             </div>
           ))
