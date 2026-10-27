@@ -436,7 +436,7 @@ def extract_pages(file_path: str, progress_cb=None, info: dict | None = None) ->
         )
         return pages
 
-    if ext in {".jpg", ".jpeg", ".png", ".tiff", ".webp"}:
+    if ext in {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}:
         if progress_cb:
             progress_cb(0, 1)
         used_backends.add(backend)
@@ -461,7 +461,7 @@ def extract_pages(file_path: str, progress_cb=None, info: dict | None = None) ->
 
     raise ValueError(
         f"Unsupported file format '{ext}'. "
-        "Supported formats: .pdf, .jpg, .jpeg, .png, .tiff, .webp"
+        "Supported formats: .pdf, .jpg, .jpeg, .png, .bmp, .tiff, .webp"
     )
 
 
@@ -512,7 +512,7 @@ def extract_images_as_base64(
                     base64.b64encode(buf.getvalue()).decode("ascii")
                 )
             doc.close()
-        elif ext in {".jpg", ".jpeg", ".png", ".tiff", ".webp"}:
+        elif ext in {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}:
             pil_image = Image.open(str(path))
             if pil_image.mode != "RGB":
                 pil_image = pil_image.convert("RGB")

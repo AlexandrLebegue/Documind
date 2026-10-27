@@ -459,3 +459,56 @@ class AgentChatResponse(BaseModel):
         default_factory=list,
         description="Ordered list of tools the agent called before answering",
     )
+
+
+# ---------------------------------------------------------------------------
+# Folder-sync ingestion
+# ---------------------------------------------------------------------------
+
+
+class IngestCheckRequest(BaseModel):
+    """List of SHA-256 hashes the agent wants to check."""
+
+    sha256: list[str] = Field(default_factory=list)
+
+
+class IngestMark(BaseModel):
+    """A single ingestion ledger entry (never includes document text)."""
+
+    sha256: str
+    verdict: str
+    doc_id: Optional[str] = None
+    reason: Optional[str] = None
+    source: Optional[str] = None
+    origin_path: Optional[str] = None
+    filename: Optional[str] = None
+    confidence: Optional[float] = None
+    first_seen: str
+    verdict_at: Optional[str] = None
+    updated_at: str
+    has_file: bool = False
+    title: Optional[str] = None
+
+
+class IngestCheckResponse(BaseModel):
+    """Known marks plus the hashes the server has never seen."""
+
+    known: list[IngestMark]
+    unknown: list[str]
+
+
+class IngestCandidateResponse(BaseModel):
+    """Immediate response after submitting a candidate file."""
+
+    sha256: str
+    verdict: str
+    queued: bool = False
+    message: str = ""
+
+
+class IngestMarksResponse(BaseModel):
+    """Paginated list of ingestion marks."""
+
+    marks: list[IngestMark]
+    total: int
+    counts: dict[str, int]

@@ -140,6 +140,32 @@ SQLITE_MMAP_MB = int(os.environ.get("SQLITE_MMAP_MB", "128"))
 MAX_UPLOAD_SIZE_MB = 50
 SUPPORTED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png", ".tiff", ".webp"}
 
+# ---------------------------------------------------------------------------
+# Folder-sync ingestion (desktop agent → server)
+# ---------------------------------------------------------------------------
+INGEST_DIR = os.path.join(DATA_DIR, "ingest")
+# Extensions the agent is allowed to send. The server revalidates everything.
+INGEST_ALLOWED_EXTENSIONS = {".pdf", ".txt", ".jpg", ".jpeg", ".png", ".bmp"}
+INGEST_MIN_SIZE_BYTES = 1024
+INGEST_MAX_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+# Below this confidence the judge result is sent to manual review.
+INGEST_JUDGE_CONFIDENCE = float(os.environ.get("INGEST_JUDGE_CONFIDENCE", "0.7"))
+
+# Server settings
+HOST = "0.0.0.0"
+PORT = 8000
+# Comma-separated list of allowed CORS origins. "*" allows every origin,
+# which is the historic behaviour; the desktop client uses tauri://localhost
+# (Linux/macOS) and http://tauri.localhost (Windows).
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ORIGINS",
+        "*,tauri://localhost,http://tauri.localhost,https://tauri.localhost",
+    ).split(",")
+    if origin.strip()
+]
+
 # Search settings
 FTS_WEIGHT = 0.4
 SEMANTIC_WEIGHT = 0.6
@@ -149,13 +175,10 @@ DEFAULT_SEARCH_TOP_K = 20
 RAG_TOP_K_DOCS = 5
 RAG_MAX_TOKENS_PER_DOC = 500
 
-# Server settings
-HOST = "0.0.0.0"
-PORT = 8000
-
 # ---------------------------------------------------------------------------
 # Create required directories at import time
 # ---------------------------------------------------------------------------
 os.makedirs(ORIGINALS_DIR, exist_ok=True)
 os.makedirs(EMBEDDING_CACHE_DIR, exist_ok=True)
 os.makedirs(OCR_CACHE_DIR, exist_ok=True)
+os.makedirs(INGEST_DIR, exist_ok=True)

@@ -274,6 +274,41 @@ def cmd_queue(args) -> int:
     return 0
 
 
+def cmd_marks(args) -> int:
+    if args.accept:
+        _post(f"/api/ingest/marks/{args.accept}/accept")
+        print(f"acceptation demandée pour {args.accept}", file=sys.stderr)
+        return 0
+    if args.reject:
+        data = _post(f"/api/ingest/marks/{args.reject}/reject")
+        print(f"refusé: {args.reject}", file=sys.stderr)
+        if not args.human:
+            _print_json(data)
+        return 0
+    if args.reevaluate:
+        _post(f"/api/ingest/marks/{args.reevaluate}/reevaluate")
+        print(f"réévaluation demandée pour {args.reevaluate}", file=sys.stderr)
+        return 0
+
+    params = {"limit": args.limit, "offset": args.offset}
+    if args.verdict:
+        params["verdict"] = args.verdict
+    data = _get("/api/ingest/marks?" + urllib.parse.urlencode(params))
+    if args.human:
+        counts = data.get("counts") or {}
+        print("verdicts: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+        for mark in data.get("marks", []):
+            reason = (mark.get("reason") or "")[:70]
+            print(
+                f"{mark.get('sha256', '')[:12]}  {mark.get('verdict', ''):9} "
+                f"{(mark.get('filename') or '')[:40]:40} {reason}"
+            )
+        print(f"\n{data.get('total', 0)} empreinte(s), affichées {data.get('offset', 0)}–{data.get('offset', 0) + len(data.get('marks', []))}")
+    else:
+        _print_json(data)
+    return 0
+
+
 def cmd_list(args) -> int:
     params = {"limit": args.limit, "offset": args.offset}
     if args.type:
@@ -634,6 +669,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("queue", help="File de traitement")
     p.set_defaults(func=cmd_queue)
+
+    p = sub.add_parser("marks", help="Empreintes d'ingestion (synchronisation de dossiers)")
+    p.add_argument("--verdict", choices=["pending", "accepted", "rejected", "error"])
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--offset", type=int, default=0)
+    p.add_argument("--accept", metavar="SHA256")
+    p.add_argument("--reject", metavar="SHA256")
+    p.add_argument("--reevaluate", metavar="SHA256")
+    p.set_defaults(func=cmd_marks)
 
     p = sub.add_parser("list", help="Lister les documents")
     p.add_argument("--type", dest="type")

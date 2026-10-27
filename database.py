@@ -250,6 +250,25 @@ def init_db() -> None:
             );
         """)
 
+        # -- file_marks table (folder-sync ingestion ledger) ------------------
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS file_marks (
+                sha256       TEXT PRIMARY KEY,
+                verdict      TEXT NOT NULL DEFAULT 'pending',
+                doc_id       TEXT,
+                reason       TEXT,
+                source       TEXT,
+                origin_path  TEXT,
+                filename     TEXT,
+                stored_path  TEXT,
+                text_content TEXT,
+                confidence   REAL,
+                first_seen   TEXT NOT NULL,
+                verdict_at   TEXT,
+                updated_at   TEXT NOT NULL
+            );
+        """)
+
         # -- Indexes for the hot query paths --------------------------------
         for idx, col in (
             ("idx_documents_doc_type", "doc_type"),
@@ -263,6 +282,13 @@ def init_db() -> None:
         ):
             cur.execute(
                 f"CREATE INDEX IF NOT EXISTS {idx} ON documents({col});"
+            )
+        for idx, col in (
+            ("idx_file_marks_verdict", "verdict"),
+            ("idx_file_marks_source", "source"),
+        ):
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS {idx} ON file_marks({col});"
             )
 
         # Keep the query planner statistics fresh without a full rebuild.
@@ -1539,3 +1565,146 @@ def get_document_count_for_file(filepath: str) -> int:
             (filepath,),
         ).fetchone()
     return row["cnt"] if row else 0
+
+
+# ---------------------------------------------------------------------------
+# Folder-sync ingestion marks (file_marks)
+# ---------------------------------------------------------------------------
+
+_MARK_COLUMNS = (
+    "sha256", "verdict", "doc_id", "reason", "source", "origin_path",
+    "filename", "stored_path", "text_content", "confidence", "first_seen",
+    "verdict_at", "updated_at",
+)
+
+
+def get_file_mark(sha256: str) -> dict[str, Any] | None:
+    """Return the ingestion mark for *sha256*, or None if unknown."""
+    with _get_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM file_marks WHERE sha256 = ?;", (sha256,)
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def get_file_marks_by_hashes(hashes: list[str]) -> list[dict[str, Any]]:
+    """Return known marks for a list of SHA-256 values."""
+    if not hashes:
+        return []
+    placeholders = ",".join("?" for _ in hashes)
+    with _get_connection() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM file_marks WHERE sha256 IN ({placeholders});",
+            tuple(hashes),
+        ).fetchall()
+    return [_row_to_dict(row) for row in rows]
+
+
+def upsert_file_mark(
+    sha256: str,
+    *,
+    verdict: str = "pending",
+    doc_id: str | None = None,
+    reason: str | None = None,
+    source: str | None = None,
+    origin_path: str | None = None,
+    filename: str | None = None,
+    stored_path: str | None = None,
+    text_content: str | None = None,
+    confidence: float | None = None,
+) -> dict[str, Any]:
+    """Create or replace an ingestion mark."""
+    now = _now_iso()
+    verdict_at = now if verdict != "pending" else None
+    with _get_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO file_marks
+                (sha256, verdict, doc_id, reason, source, origin_path,
+                 filename, stored_path, text_content, confidence,
+                 first_seen, verdict_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(sha256) DO UPDATE SET
+                verdict=excluded.verdict,
+                doc_id=excluded.doc_id,
+                reason=excluded.reason,
+                source=excluded.source,
+                origin_path=excluded.origin_path,
+                filename=excluded.filename,
+                stored_path=excluded.stored_path,
+                text_content=excluded.text_content,
+                confidence=excluded.confidence,
+                verdict_at=excluded.verdict_at,
+                updated_at=excluded.updated_at;
+            """,
+            (
+                sha256, verdict, doc_id, reason, source, origin_path,
+                filename, stored_path, text_content, confidence,
+                now, verdict_at, now,
+            ),
+        )
+        conn.commit()
+    return get_file_mark(sha256)  # type: ignore[return-value]
+
+
+def update_file_mark(sha256: str, **fields: Any) -> None:
+    """Partially update an ingestion mark (unknown keys are ignored)."""
+    allowed = {k: v for k, v in fields.items() if k in _MARK_COLUMNS and k != "sha256"}
+    if not allowed:
+        return
+    allowed["updated_at"] = _now_iso()
+    if "verdict" in allowed and allowed["verdict"] != "pending":
+        allowed.setdefault("verdict_at", _now_iso())
+    assignments = ", ".join(f"{key} = ?" for key in allowed)
+    with _get_connection() as conn:
+        conn.execute(
+            f"UPDATE file_marks SET {assignments} WHERE sha256 = ?;",
+            (*allowed.values(), sha256),
+        )
+        conn.commit()
+
+
+def delete_file_mark(sha256: str) -> None:
+    """Remove an ingestion mark so the file can be evaluated again."""
+    with _get_connection() as conn:
+        conn.execute("DELETE FROM file_marks WHERE sha256 = ?;", (sha256,))
+        conn.commit()
+
+
+def list_file_marks(
+    verdict: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    """Return recent ingestion marks, newest first, optionally filtered."""
+    sql = "SELECT * FROM file_marks"
+    params: list[Any] = []
+    if verdict:
+        sql += " WHERE verdict = ?"
+        params.append(verdict)
+    sql += " ORDER BY first_seen DESC LIMIT ? OFFSET ?;"
+    params.extend([max(1, min(limit, 500)), max(0, offset)])
+    with _get_connection() as conn:
+        rows = conn.execute(sql, tuple(params)).fetchall()
+    return [_row_to_dict(row) for row in rows]
+
+
+def count_file_marks(verdict: str | None = None) -> int:
+    """Count ingestion marks, optionally filtered by verdict."""
+    sql = "SELECT COUNT(*) AS cnt FROM file_marks"
+    params: tuple[Any, ...] = ()
+    if verdict:
+        sql += " WHERE verdict = ?"
+        params = (verdict,)
+    with _get_connection() as conn:
+        row = conn.execute(sql, params).fetchone()
+    return row["cnt"] if row else 0
+
+
+def count_file_marks_by_verdict() -> dict[str, int]:
+    """Return a ``{verdict: count}`` mapping for all marks."""
+    with _get_connection() as conn:
+        rows = conn.execute(
+            "SELECT verdict, COUNT(*) AS cnt FROM file_marks GROUP BY verdict;"
+        ).fetchall()
+    return {row["verdict"]: row["cnt"] for row in rows}

@@ -195,3 +195,47 @@ def segmentation_user_message(pages: list[str], max_chars_per_page: int = 1400) 
             snippet = snippet[:max_chars_per_page] + " […]"
         parts.append(f"--- PAGE {i} ---\n{snippet}")
     return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Ingestion judge (folder-sync): is this worth archiving?
+# ---------------------------------------------------------------------------
+
+JUDGE_PROMPT = """Tu es un archiviste chargé de trier des fichiers personnels.
+
+On te donne le texte OCR (ou natif) d'un fichier. Tu dois décider s'il s'agit
+d'un document personnel ou administratif qui mérite d'être conservé dans une
+archive documentaire.
+
+À CONSERVER (keep = true) :
+- factures, reçus détaillés, justificatifs d'achat ;
+- bulletins de paie, contrats de travail, attestations employeur ;
+- contrats (bail, assurance, abonnement, prêt), quittances ;
+- avis d'imposition, taxe foncière, taxe d'habitation, déclarations ;
+- pièces d'identité (CNI, passeport, titre de séjour, permis), actes d'état civil ;
+- documents de scolarité (certificats, diplômes, relevés de notes) ;
+- documents de santé (ordonnances, comptes rendus, attestations) ;
+- documents bancaires (RIB, relevés de compte) ;
+- documents de logement (justificatif de domicile, bail) ;
+- courriers administratifs nominatifs avec un émetteur et une date.
+
+À IGNORER (keep = false) :
+- captures d'écran quelconques, photos personnelles, mèmes, images décoratives ;
+- pages web imprimées sans caractère administratif (articles, recettes, tutoriels) ;
+- tickets de caisse illisibles, documents vides ou quasi vides ;
+- notes manuscrites sans valeur administrative, brouillons ;
+- fichiers techniques, logs, code source, tableaux de données sans émetteur ;
+- publicités, prospectus, catalogues.
+
+Règles :
+- En cas de doute réel sur la nature du document, mets une confiance basse
+  (inférieure à 0.7) plutôt que de deviner.
+- La confiance doit refléter ta certitude : 0.9+ si évident, 0.7-0.9 si probable,
+  < 0.7 si incertain.
+- La raison doit être courte (une phrase), en français, sans donnée personnelle
+  inutile.
+
+Réponds UNIQUEMENT avec un objet JSON strict, sans texte avant ni après, sans
+bloc de code markdown :
+{"keep": true, "confidence": 0.92, "reason": "Facture d'électricité nominative avec émetteur et date."}
+"""

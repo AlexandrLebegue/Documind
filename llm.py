@@ -13,6 +13,7 @@ from prompts import (
     METADATA_EXTRACTION_PROMPT,
     METADATA_CORRECTION_PROMPT,
     METADATA_MERGE_PROMPT,
+    JUDGE_PROMPT,
     OCR_TEXT_ONLY_NOTE,
     RAG_CHAT_PROMPT,
     SEGMENTATION_PROMPT,
@@ -649,6 +650,77 @@ def extract_metadata(
 
     logger.error("Both metadata extraction attempts failed — returning default metadata")
     return _fallback()
+
+
+# ---------------------------------------------------------------------------
+# Folder-sync ingestion judge
+# ---------------------------------------------------------------------------
+
+_JUDGE_MAX_CHARS = 8000
+
+
+def judge_document(
+    client: httpx.Client,
+    ocr_text: str,
+    filename: str | None = None,
+) -> dict:
+    """Decide whether a synced file deserves to be archived.
+
+    Returns ``{"keep": bool, "confidence": float, "reason": str}``. Any
+    failure yields a low-confidence ``keep=False`` result so the caller can
+    route the file to manual review instead of silently archiving it.
+    """
+    text = (ocr_text or "").strip()
+    if not text:
+        return {
+            "keep": False,
+            "confidence": 0.0,
+            "reason": "Document vide ou texte illisible",
+        }
+
+    user_message = (
+        f"Nom du fichier : {filename or 'inconnu'}\n\n"
+        f"Texte extrait :\n{text[:_JUDGE_MAX_CHARS]}"
+    )
+    try:
+        raw = _call_llm(
+            client,
+            system_prompt=JUDGE_PROMPT,
+            user_message=user_message,
+            temperature=0.0,
+            max_tokens=400,
+        )
+        data = _extract_json(raw)
+    except Exception:
+        logger.exception("Judge LLM call failed")
+        return {
+            "keep": False,
+            "confidence": 0.0,
+            "reason": "Juge indisponible (erreur LLM)",
+        }
+
+    if not isinstance(data, dict) or "keep" not in data:
+        logger.warning("Judge returned an unusable response: %r", raw[:300])
+        return {
+            "keep": False,
+            "confidence": 0.0,
+            "reason": "Réponse du juge illisible",
+        }
+
+    keep = data.get("keep")
+    if isinstance(keep, str):
+        keep = keep.strip().lower() in {"true", "oui", "yes", "1"}
+    else:
+        keep = bool(keep)
+
+    try:
+        confidence = float(data.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+    confidence = max(0.0, min(1.0, confidence))
+
+    reason = str(data.get("reason") or "").strip()[:400]
+    return {"keep": keep, "confidence": confidence, "reason": reason}
 
 
 # ---------------------------------------------------------------------------

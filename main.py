@@ -15,7 +15,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +25,7 @@ from config import (
     ORIGINALS_DIR, MAX_UPLOAD_SIZE_MB,
     SUPPORTED_EXTENSIONS, HOST, PORT, RAG_TOP_K_DOCS,
     load_settings, save_settings, DATA_DIR,
+    CORS_ORIGINS, INGEST_DIR, INGEST_ALLOWED_EXTENSIONS, INGEST_MAX_SIZE_BYTES,
 )
 from database import (
     init_db, insert_document, get_document, list_documents, count_documents,
@@ -48,6 +49,9 @@ from database import (
     update_document_hash,
     list_documents_for_reprocess,
     list_root_documents_for_dedupe,
+    get_file_mark, get_file_marks_by_hashes, list_file_marks,
+    count_file_marks, count_file_marks_by_verdict, upsert_file_mark,
+    update_file_mark, delete_file_mark,
 )
 from models import (
     DocumentResponse, DocumentListResponse, DocumentUpdateRequest,
@@ -65,9 +69,16 @@ from models import (
     GapAlert, GapAlertsResponse,
     AgentChatRequest, AgentChatResponse, ToolCallLog,
     QueueStatusResponse,
+    IngestCheckRequest, IngestCheckResponse, IngestMark,
+    IngestCandidateResponse, IngestMarksResponse,
 )
 from processing_queue import get_queue
 from pipeline import process_document, reprocess_document
+from ingest import (
+    check_magic_bytes, sha256_file, safe_filename, register_candidate,
+    process_candidate, accept_mark, reject_mark, reevaluate_mark,
+    validate_candidate_path,
+)
 from search import hybrid_search, load_embeddings_cache, refresh_embeddings_cache
 from llm import init_llm_client, chat_with_context, chat_with_context_multiturn, analyze_procedure, match_document_for_procedure
 from embeddings import load_embedding_model
@@ -357,7 +368,7 @@ app = FastAPI(
 # CORS for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1955,6 +1966,230 @@ async def update_apply():
 
     asyncio.create_task(_run())
     return {"status": "updating", "message": "Mise à jour en cours, redémarrage imminent…"}
+
+
+# ---------------------------------------------------------------------------
+# Folder-sync ingestion (desktop agent)
+# ---------------------------------------------------------------------------
+
+
+def _mark_to_model(mark: dict) -> IngestMark:
+    """Convert a raw file_marks row into the public API model."""
+    doc = get_document(mark["doc_id"]) if mark.get("doc_id") else None
+    stored = mark.get("stored_path")
+    return IngestMark(
+        sha256=mark["sha256"],
+        verdict=mark["verdict"],
+        doc_id=mark.get("doc_id"),
+        reason=mark.get("reason"),
+        source=mark.get("source"),
+        origin_path=mark.get("origin_path"),
+        filename=mark.get("filename"),
+        confidence=mark.get("confidence"),
+        first_seen=mark.get("first_seen") or "",
+        verdict_at=mark.get("verdict_at"),
+        updated_at=mark.get("updated_at") or "",
+        has_file=bool(stored and os.path.exists(stored)),
+        title=(doc or {}).get("title"),
+    )
+
+
+async def _enqueue_ingest(label: str, fn) -> None:
+    """Run a blocking ingestion step inside the single-worker queue."""
+    import asyncio
+
+    async def _job():
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, fn)
+        if app.state.embeddings_cache is not None:
+            app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+
+    await get_queue().enqueue(label=label, fn=_job)
+
+
+@app.post(
+    "/api/ingest/check",
+    response_model=IngestCheckResponse,
+    summary="Check which SHA-256 hashes are already known",
+    description="The desktop agent sends the hashes of scanned files; the "
+    "server returns the ones it has already judged and the ones it has "
+    "never seen. Only unknown files are uploaded.",
+)
+async def ingest_check(body: IngestCheckRequest) -> IngestCheckResponse:
+    """Return known marks and unknown hashes."""
+    hashes: list[str] = []
+    for value in body.sha256:
+        digest = (value or "").strip().lower()
+        if len(digest) == 64 and digest not in hashes:
+            hashes.append(digest)
+
+    known_rows = get_file_marks_by_hashes(hashes)
+    known_set = {row["sha256"] for row in known_rows}
+    return IngestCheckResponse(
+        known=[_mark_to_model(row) for row in known_rows],
+        unknown=[digest for digest in hashes if digest not in known_set],
+    )
+
+
+@app.post(
+    "/api/ingest/candidate",
+    response_model=IngestCandidateResponse,
+    status_code=202,
+    summary="Submit a folder-sync candidate",
+    description="Upload a file discovered by the desktop agent. The server "
+    "revalidates extension and magic bytes, OCRs it, asks the text-only "
+    "judge whether it belongs in the archive, and either creates a document, "
+    "rejects it, or marks it pending for manual review.",
+)
+async def ingest_candidate(
+    file: UploadFile = File(...),
+    origin_path: str = Form(""),
+    machine: str = Form(""),
+    force: bool = Form(False),
+) -> IngestCandidateResponse:
+    """Accept, reject or park a candidate file."""
+    filename = safe_filename(file.filename or "document")
+    content = await file.read()
+    if len(content) > INGEST_MAX_SIZE_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File size ({len(content) / (1024 * 1024):.1f} MB) exceeds "
+            f"the {INGEST_MAX_SIZE_BYTES // (1024 * 1024)} MB limit.",
+        )
+
+    sha256 = hashlib.sha256(content).hexdigest()
+    existing = get_file_mark(sha256)
+    if existing is not None:
+        if existing["verdict"] == "accepted" or not force:
+            return IngestCandidateResponse(
+                sha256=sha256,
+                verdict=existing["verdict"],
+                queued=False,
+                message="Empreinte déjà connue du serveur",
+            )
+        # A forced re-evaluation of a rejected/pending/error mark starts over.
+        delete_file_mark(sha256)
+
+    ok, reason = check_magic_bytes(filename, content)
+    if not ok:
+        # Record the refusal so the agent does not retry this file forever.
+        upsert_file_mark(
+            sha256,
+            verdict="rejected",
+            reason=reason,
+            source=machine[:200],
+            origin_path=origin_path[:1000],
+            filename=filename,
+        )
+        raise HTTPException(status_code=400, detail=reason)
+
+    stored_path = os.path.join(INGEST_DIR, f"{sha256[:16]}_{filename}")
+    try:
+        with open(stored_path, "wb") as fh:
+            fh.write(content)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Stored file error: {exc}") from exc
+
+    register_candidate(
+        sha256=sha256,
+        filename=filename,
+        machine=machine[:200],
+        origin_path=origin_path[:1000],
+        stored_path=stored_path,
+    )
+    await _enqueue_ingest(
+        f"Ingestion — {filename}",
+        lambda: process_candidate(sha256, app.state.llm, app.state.embedding_model),
+    )
+    return IngestCandidateResponse(
+        sha256=sha256,
+        verdict="pending",
+        queued=True,
+        message="Candidat mis en file de traitement",
+    )
+
+
+@app.get(
+    "/api/ingest/marks",
+    response_model=IngestMarksResponse,
+    summary="List ingestion marks",
+    description="Recent folder-sync verdicts, newest first, with per-verdict counts.",
+)
+async def ingest_marks(
+    verdict: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+) -> IngestMarksResponse:
+    """Return the ingestion ledger."""
+    rows = list_file_marks(verdict=verdict, limit=limit, offset=offset)
+    return IngestMarksResponse(
+        marks=[_mark_to_model(row) for row in rows],
+        total=count_file_marks(verdict),
+        counts=count_file_marks_by_verdict(),
+    )
+
+
+@app.get(
+    "/api/ingest/marks/{sha256}",
+    response_model=IngestMark,
+    summary="Get a single ingestion mark",
+)
+async def ingest_mark(sha256: str) -> IngestMark:
+    """Return one mark by SHA-256."""
+    mark = get_file_mark(sha256.lower())
+    if mark is None:
+        raise HTTPException(status_code=404, detail="Mark not found")
+    return _mark_to_model(mark)
+
+
+@app.post(
+    "/api/ingest/marks/{sha256}/accept",
+    summary="Accept a pending candidate",
+    description="Create the document from a pending candidate, reusing its "
+    "cached OCR text, then run metadata extraction and embedding.",
+)
+async def ingest_accept(sha256: str) -> JSONResponse:
+    """Queue manual acceptance of a pending candidate."""
+    mark = get_file_mark(sha256.lower())
+    if mark is None:
+        raise HTTPException(status_code=404, detail="Mark not found")
+    if mark["verdict"] == "accepted" and mark.get("doc_id"):
+        return JSONResponse(content={"status": "already_accepted", "sha256": sha256})
+    await _enqueue_ingest(
+        f"Acceptation — {mark.get('filename') or sha256[:8]}",
+        lambda: accept_mark(sha256.lower(), app.state.llm, app.state.embedding_model),
+    )
+    return JSONResponse(status_code=202, content={"status": "queued", "sha256": sha256})
+
+
+@app.post(
+    "/api/ingest/marks/{sha256}/reject",
+    summary="Reject a pending candidate",
+)
+async def ingest_reject(sha256: str) -> IngestMark:
+    """Reject a candidate and delete its temporary file."""
+    mark = reject_mark(sha256.lower())
+    if mark is None:
+        raise HTTPException(status_code=404, detail="Mark not found")
+    return _mark_to_model(mark)
+
+
+@app.post(
+    "/api/ingest/marks/{sha256}/reevaluate",
+    summary="Force a new judge pass",
+    description="Re-run the judge on a stored candidate, refresh an accepted "
+    "document's explanation, or drop a rejected mark so the agent resends it.",
+)
+async def ingest_reevaluate(sha256: str) -> JSONResponse:
+    """Queue a forced re-evaluation."""
+    mark = get_file_mark(sha256.lower())
+    if mark is None:
+        raise HTTPException(status_code=404, detail="Mark not found")
+    await _enqueue_ingest(
+        f"Réévaluation — {mark.get('filename') or sha256[:8]}",
+        lambda: reevaluate_mark(sha256.lower(), app.state.llm, app.state.embedding_model),
+    )
+    return JSONResponse(status_code=202, content={"status": "queued", "sha256": sha256})
 
 
 # ---------------------------------------------------------------------------

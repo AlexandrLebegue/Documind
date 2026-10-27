@@ -67,6 +67,10 @@ def _split_page_markers(text: str) -> list[str]:
     return pages or [text.strip()]
 
 
+# Public alias used by the folder-sync ingestion module.
+split_pages = _split_page_markers
+
+
 def _mark_error(doc_id: str, stage: str, exc: BaseException | None = None) -> None:
     """Set a document to error status and keep a short, non-sensitive reason."""
     message = f"{stage} failed"
@@ -162,19 +166,24 @@ def _delete_previous_children(doc_id: str) -> None:
         db_delete_document(child["id"])
 
 
-def process_document(
+def process_extracted_pages(
     doc_id: str,
     file_path: str,
+    pages: list[str],
     llm: httpx.Client,
     embedding_model,
+    *,
+    ocr_label: str = "ingest",
+    ocr_seconds: float | None = None,
+    overall_started: float | None = None,
 ) -> None:
-    """Run the full pipeline for a freshly uploaded document.
+    """Finish a document from already-extracted page texts.
 
-    OCR page by page (OvisOCR3 / Tesseract), persist progress per page,
-    segment multi-document scans, then extract metadata and embeddings for
-    each resulting document. Failures set the document status to ``error``.
+    This is the post-OCR half of :func:`process_document`: segmentation,
+    metadata extraction and embeddings. The folder-sync ingestion flow uses
+    it to reuse OCR results instead of running a second expensive pass.
     """
-    logger.info("Starting processing pipeline for document %s (%s)", doc_id, file_path)
+    started = overall_started if overall_started is not None else time.perf_counter()
     doc = get_document(doc_id)
     if doc is None:
         logger.error("Document %s not found in database", doc_id)
@@ -184,31 +193,14 @@ def process_document(
         _mark_error(doc_id, "llm_client")
         return
 
-    def _progress(done: int, total: int) -> None:
-        try:
-            update_document_progress(doc_id, done, total, OCR_BACKEND)
-        except Exception:
-            logger.debug("Could not persist OCR progress", exc_info=True)
-
-    overall_started = time.perf_counter()
-    ocr_started = time.perf_counter()
-    ocr_info: dict = {}
-    try:
-        pages = extract_pages(file_path, progress_cb=_progress, info=ocr_info)
-    except Exception as exc:
-        logger.error(
-            "OCR failed for doc %s:\n%s", doc_id, traceback.format_exc()
-        )
-        _mark_error(doc_id, "ocr", exc)
-        return
-
-    ocr_seconds = round(time.perf_counter() - ocr_started, 3)
     if not pages:
         pages = [""]
     total = len(pages)
-    ocr_label = "+".join(sorted(ocr_info.get("backends", []))) or OCR_BACKEND
     update_document_progress(doc_id, total, total, ocr_label)
-    update_document_fields(doc_id, ocr_seconds=ocr_seconds, ocr_backend=ocr_label)
+    fields: dict = {"ocr_backend": ocr_label}
+    if ocr_seconds is not None:
+        fields["ocr_seconds"] = ocr_seconds
+    update_document_fields(doc_id, **fields)
 
     try:
         segments = segment_documents(llm, pages)
@@ -260,7 +252,7 @@ def process_document(
         update_document_fields(
             doc_id,
             llm_seconds=round(sum(c.get("llm_seconds") or 0 for c in children), 3),
-            total_seconds=round(time.perf_counter() - overall_started, 3),
+            total_seconds=round(time.perf_counter() - started, 3),
         )
         logger.info(
             "Segmented document %s into %d document(s)", doc_id[:8], len(segments)
@@ -278,8 +270,61 @@ def process_document(
     )
     update_document_fields(
         doc_id,
+        total_seconds=round(time.perf_counter() - started, 3),
+    )
+
+
+def process_document(
+    doc_id: str,
+    file_path: str,
+    llm: httpx.Client,
+    embedding_model,
+) -> None:
+    """Run the full pipeline for a freshly uploaded document.
+
+    OCR page by page (OvisOCR3 / Tesseract), persist progress per page,
+    segment multi-document scans, then extract metadata and embeddings for
+    each resulting document. Failures set the document status to ``error``.
+    """
+    logger.info("Starting processing pipeline for document %s (%s)", doc_id, file_path)
+    doc = get_document(doc_id)
+    if doc is None:
+        logger.error("Document %s not found in database", doc_id)
+        return
+    if llm is None:
+        logger.error("No LLM client available — cannot process %s", doc_id)
+        _mark_error(doc_id, "llm_client")
+        return
+
+    def _progress(done: int, total: int) -> None:
+        try:
+            update_document_progress(doc_id, done, total, OCR_BACKEND)
+        except Exception:
+            logger.debug("Could not persist OCR progress", exc_info=True)
+
+    overall_started = time.perf_counter()
+    ocr_started = time.perf_counter()
+    ocr_info: dict = {}
+    try:
+        pages = extract_pages(file_path, progress_cb=_progress, info=ocr_info)
+    except Exception as exc:
+        logger.error(
+            "OCR failed for doc %s:\n%s", doc_id, traceback.format_exc()
+        )
+        _mark_error(doc_id, "ocr", exc)
+        return
+
+    ocr_seconds = round(time.perf_counter() - ocr_started, 3)
+    ocr_label = "+".join(sorted(ocr_info.get("backends", []))) or OCR_BACKEND
+    process_extracted_pages(
+        doc_id,
+        file_path,
+        pages,
+        llm,
+        embedding_model,
+        ocr_label=ocr_label,
         ocr_seconds=ocr_seconds,
-        total_seconds=round(time.perf_counter() - overall_started, 3),
+        overall_started=overall_started,
     )
 
 
