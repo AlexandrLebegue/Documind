@@ -5,12 +5,18 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from config import DB_PATH
+from config import DB_PATH, SQLITE_CACHE_MB, SQLITE_MMAP_MB
 
 logger = logging.getLogger(__name__)
+
+# One connection per thread — avoids reconnecting (and re-running PRAGMAs)
+# on every single query. FastAPI runs sync handlers in the thread pool, so a
+# small number of long-lived connections is exactly what we want.
+_local = threading.local()
 
 
 def _now_iso() -> str:
@@ -19,11 +25,26 @@ def _now_iso() -> str:
 
 
 def _get_connection() -> sqlite3.Connection:
-    """Open a new SQLite connection with WAL mode and foreign keys enabled."""
-    conn = sqlite3.connect(DB_PATH)
+    """Return a per-thread SQLite connection with tuned PRAGMAs.
+
+    WAL mode allows concurrent readers while a writer is active.  The
+    connection is cached on the thread so hot API paths no longer pay the
+    cost of opening a file and applying PRAGMAs on every query.
+    """
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        return conn
+
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
     conn.execute("PRAGMA foreign_keys=ON;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.execute("PRAGMA temp_store=MEMORY;")
+    conn.execute(f"PRAGMA cache_size=-{max(1, SQLITE_CACHE_MB) * 1024};")
+    conn.execute(f"PRAGMA mmap_size={max(0, SQLITE_MMAP_MB) * 1024 * 1024};")
     conn.row_factory = sqlite3.Row
+    _local.conn = conn
     return conn
 
 
@@ -80,25 +101,43 @@ def init_db() -> None:
         except Exception:
             pass  # Column already exists
 
+        # Migrations for multi-document segmentation and page progress.
+        for col, decl in (
+            ("parent_id", "TEXT"),
+            ("page_start", "INTEGER"),
+            ("page_end", "INTEGER"),
+            ("pages_done", "INTEGER DEFAULT 0"),
+            ("pages_total", "INTEGER DEFAULT 0"),
+            ("ocr_backend", "TEXT"),
+        ):
+            try:
+                cur.execute(f"ALTER TABLE documents ADD COLUMN {col} {decl};")
+            except Exception:
+                pass  # Column already exists
+
         # -- FTS5 virtual table (content-sync with documents) ----------------
-        # Drop and recreate to ensure schema matches (multi-column index).
-        # The rebuild at the end of init_db re-populates the index.
-        cur.execute("DROP TABLE IF EXISTS documents_fts;")
-        cur.execute("""
-            CREATE VIRTUAL TABLE documents_fts
-            USING fts5(
-                title, filename, text_content, emetteur, resume, tags,
-                content='documents',
-                content_rowid='rowid'
-            );
-        """)
+        # Only create it once: dropping/rebuilding the index on every startup
+        # was the single most expensive part of boot on a populated database.
+        cur.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='documents_fts';"
+        )
+        if cur.fetchone() is None:
+            cur.execute("""
+                CREATE VIRTUAL TABLE documents_fts
+                USING fts5(
+                    title, filename, text_content, emetteur, resume, tags,
+                    content='documents',
+                    content_rowid='rowid'
+                );
+            """)
+            cur.execute("INSERT INTO documents_fts(documents_fts) VALUES('rebuild');")
+            logger.info("FTS5 index created and populated")
 
         # -- Triggers to keep FTS in sync -----------------------------------
         _FTS_COLS = "title, filename, text_content, emetteur, resume, tags"
 
-        cur.execute("DROP TRIGGER IF EXISTS documents_ai;")
         cur.execute(f"""
-            CREATE TRIGGER documents_ai AFTER INSERT ON documents
+            CREATE TRIGGER IF NOT EXISTS documents_ai AFTER INSERT ON documents
             BEGIN
                 INSERT INTO documents_fts(rowid, {_FTS_COLS})
                 VALUES (new.rowid, new.title, new.filename, new.text_content,
@@ -106,9 +145,8 @@ def init_db() -> None:
             END;
         """)
 
-        cur.execute("DROP TRIGGER IF EXISTS documents_ad;")
         cur.execute(f"""
-            CREATE TRIGGER documents_ad AFTER DELETE ON documents
+            CREATE TRIGGER IF NOT EXISTS documents_ad AFTER DELETE ON documents
             BEGIN
                 INSERT INTO documents_fts(documents_fts, rowid, {_FTS_COLS})
                 VALUES ('delete', old.rowid, old.title, old.filename,
@@ -116,9 +154,8 @@ def init_db() -> None:
             END;
         """)
 
-        cur.execute("DROP TRIGGER IF EXISTS documents_au;")
         cur.execute(f"""
-            CREATE TRIGGER documents_au AFTER UPDATE ON documents
+            CREATE TRIGGER IF NOT EXISTS documents_au AFTER UPDATE ON documents
             BEGIN
                 INSERT INTO documents_fts(documents_fts, rowid, {_FTS_COLS})
                 VALUES ('delete', old.rowid, old.title, old.filename,
@@ -202,11 +239,22 @@ def init_db() -> None:
             );
         """)
 
-        # -- Rebuild FTS index from content table ----------------------------
-        # Ensures the index is always in sync, even for pre-existing data.
-        cur.execute("INSERT INTO documents_fts(documents_fts) VALUES('rebuild');")
-        logger.info("FTS5 index rebuilt")
+        # -- Indexes for the hot query paths --------------------------------
+        for idx, col in (
+            ("idx_documents_doc_type", "doc_type"),
+            ("idx_documents_doc_date", "doc_date"),
+            ("idx_documents_status", "status"),
+            ("idx_documents_created_at", "created_at"),
+            ("idx_documents_date_expiration", "date_expiration"),
+            ("idx_documents_date_echeance", "date_echeance"),
+            ("idx_documents_parent_id", "parent_id"),
+        ):
+            cur.execute(
+                f"CREATE INDEX IF NOT EXISTS {idx} ON documents({col});"
+            )
 
+        # Keep the query planner statistics fresh without a full rebuild.
+        cur.execute("PRAGMA optimize;")
         conn.commit()
 
 

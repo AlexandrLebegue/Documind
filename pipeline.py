@@ -5,7 +5,6 @@ import traceback
 from pathlib import Path
 
 import httpx
-from sentence_transformers import SentenceTransformer
 
 from ocr import extract_text, extract_images_as_base64
 from llm import extract_metadata
@@ -48,7 +47,7 @@ def process_document(
     doc_id: str,
     file_path: str,
     llm: httpx.Client,
-    embedding_model: SentenceTransformer,
+    embedding_model,
 ) -> None:
     """Run the full document processing pipeline.
 
@@ -147,7 +146,7 @@ def process_document(
 def reprocess_document(
     doc_id: str,
     llm: httpx.Client,
-    embedding_model: SentenceTransformer,
+    embedding_model,
 ) -> None:
     """Re-run the processing pipeline for an existing document.
 

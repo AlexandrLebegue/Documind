@@ -1,29 +1,58 @@
-"""OCR module: image preprocessing and text extraction via Tesseract 5."""
+"""OCR module: page rendering, OvisOCR3 (HTTP) and Tesseract backends.
+
+The default backend is OvisOCR3, an OpenAI-compatible vision model served by
+llama.cpp on the LAN. Tesseract remains available as an offline fallback.
+"""
+
+from __future__ import annotations
 
 import base64
 import io
 import os
 import sys
-import cv2
-import numpy as np
-import pytesseract
-from PIL import Image
-import fitz  # PyMuPDF
 from pathlib import Path
-from config import OCR_LANGUAGES, MIN_TEXT_LENGTH_PER_PAGE
+
+import fitz  # PyMuPDF
+
+from config import (
+    MIN_TEXT_LENGTH_PER_PAGE,
+    OCR_BACKEND,
+    OCR_CACHE_DIR,
+    OCR_CACHE_ENABLED,
+    OCR_DPI,
+    OCR_JPEG_QUALITY,
+    OCR_LANGUAGES,
+    OCR_MAX_TOKENS,
+    OCR_PAGE_RETRIES,
+    OCR_PAGE_TIMEOUT,
+    OCR_PROMPT,
+    OVISOCR_MODEL,
+    OVISOCR_URL,
+)
 import logging
 
 logger = logging.getLogger(__name__)
+
+# torch/cv2/PIL are imported lazily so that startup does not pay for the
+# Tesseract-only dependency chain when the Ovis backend is used.
 
 # Auto-detect Tesseract on Windows
 if sys.platform == "win32":
     _win_tesseract = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
     if os.path.isfile(_win_tesseract):
+        import pytesseract
+
         pytesseract.pytesseract.tesseract_cmd = _win_tesseract
         logger.info("Tesseract found at %s", _win_tesseract)
 
 
 def preprocess_image(image: np.ndarray) -> np.ndarray:
+    """Apply the Tesseract preprocessing pipeline to an image.
+
+    Kept for the Tesseract fallback backend.
+    """
+    import cv2
+    import numpy as np
     """Apply full preprocessing pipeline to an image for optimal OCR results.
 
     Pipeline steps:
@@ -80,6 +109,8 @@ def _deskew(image: np.ndarray) -> np.ndarray:
     Returns:
         Deskewed grayscale image.
     """
+    import cv2
+
     # Threshold to find contours
     thresh = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -134,6 +165,9 @@ def extract_text_from_image(image_path: str) -> str:
         FileNotFoundError: If the image file does not exist.
         RuntimeError: If OpenCV cannot load the image.
     """
+    import cv2
+    import pytesseract
+
     path = Path(image_path)
     if not path.exists():
         raise FileNotFoundError(f"Image file not found: {image_path}")
@@ -170,6 +204,9 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     path = Path(pdf_path)
     if not path.exists():
         raise FileNotFoundError(f"PDF file not found: {pdf_path}")
+
+    import numpy as np
+    from PIL import Image
 
     doc = fitz.open(str(path))
     all_pages_text: list[str] = []
@@ -273,6 +310,8 @@ def extract_images_as_base64(
     if not path.exists():
         logger.warning("Cannot extract images — file not found: %s", file_path)
         return []
+
+    from PIL import Image
 
     ext = path.suffix.lower()
     images_b64: list[str] = []

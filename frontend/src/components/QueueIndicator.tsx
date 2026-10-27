@@ -10,6 +10,8 @@ export default function QueueIndicator() {
     let cancelled = false;
 
     async function poll() {
+      // Don't burn API/SQLite calls while the tab is in the background.
+      if (document.visibilityState === 'hidden') return;
       try {
         const data = await getQueue();
         if (!cancelled) setQueue(data);
@@ -19,7 +21,7 @@ export default function QueueIndicator() {
     }
 
     poll();
-    const interval = setInterval(poll, 2500);
+    const interval = setInterval(poll, 4000);
     return () => {
       cancelled = true;
       clearInterval(interval);

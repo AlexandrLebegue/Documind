@@ -16,10 +16,12 @@
 - Aucun document personnel dans git / docs / logs poussés ; bench stocké sur LXC 105.
 
 ## Mesures
-(vierge — voir `docs/PERF.md` et `docs/BENCH.md`)
+- Démarrage (LXC 105) : RSS 473 Mo → 32 Mo, embeddings différés (`docs/PERF.md`).
+- SQLite 1 000 docs : `init_db` 17,6 → 1,1 ms, `list` 6,8 → 0,5 ms, `stats` 9,1 → 0,6 ms.
+- OvisOCR3 8081 OK ; MiniCPM 8080 relancé par ProxBoss, health OK.
 
 ## TODO
-- [ ] A. Profiling + optimisations mesurées
+- [x] A. Profiling + optimisations mesurées
 - [ ] Déploiement LXC 105
 - [ ] B. Backend OCR `ovis`
 - [ ] C. MiniCPM texte seul

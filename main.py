@@ -220,6 +220,15 @@ def _parse_document(doc_dict: dict) -> DocumentResponse:
 # Background task helpers
 # ---------------------------------------------------------------------------
 
+def _ensure_embeddings_cache(app: FastAPI) -> list:
+    """Load the in-memory embeddings cache on first use (lazy, thread-safe)."""
+    cache = app.state.embeddings_cache
+    if cache is None:
+        cache = load_embeddings_cache()
+        app.state.embeddings_cache = cache
+    return cache
+
+
 async def _enqueue_process(doc_id: str, file_path: str, filename: str, app: FastAPI) -> None:
     """Enqueue a document processing job in the FIFO queue."""
     import asyncio
@@ -230,7 +239,8 @@ async def _enqueue_process(doc_id: str, file_path: str, filename: str, app: Fast
             None,
             lambda: process_document(doc_id, file_path, app.state.llm, app.state.embedding_model),
         )
-        app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+        if app.state.embeddings_cache is not None:
+            app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
 
     await get_queue().enqueue(label=filename, fn=_job)
 
@@ -245,7 +255,8 @@ async def _enqueue_reprocess(doc_id: str, filename: str, app: FastAPI) -> None:
             None,
             lambda: reprocess_document(doc_id, app.state.llm, app.state.embedding_model),
         )
-        app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+        if app.state.embeddings_cache is not None:
+            app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
 
     await get_queue().enqueue(label=f"Retraitement — {filename}", fn=_job)
 
@@ -295,9 +306,9 @@ async def lifespan(app: FastAPI):
         app.state.embedding_model = None
         logger.warning("Embedding model failed to load: %s", exc)
 
-    # 4. Load embeddings cache
-    app.state.embeddings_cache = load_embeddings_cache()
-    logger.info("Embeddings cache loaded: %d documents", len(app.state.embeddings_cache))
+    # 4. Embeddings cache is loaded lazily on first search / first processed doc
+    app.state.embeddings_cache = None
+    logger.info("Embeddings cache deferred (lazy load on first use)")
 
     # 5. Sync crontab with saved NAS settings (idempotent, no-op on Windows)
     try:
@@ -537,7 +548,8 @@ async def delete_doc(doc_id: str) -> JSONResponse:
         raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
 
     delete_document(doc_id)
-    app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+    if app.state.embeddings_cache is not None:
+        app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
     logger.info("Document %s deleted", doc_id)
 
     return JSONResponse(content={"message": "Document deleted successfully"})
@@ -623,7 +635,7 @@ async def search_documents(body: SearchRequest) -> SearchResponse:
     results = hybrid_search(
         query=body.query,
         embedding_model=app.state.embedding_model,
-        embeddings_cache=app.state.embeddings_cache,
+        embeddings_cache=_ensure_embeddings_cache(app),
     )
 
     items: list[SearchResultItem] = []
@@ -769,11 +781,11 @@ async def chat(body: ChatRequest) -> ChatResponse:
 
     # Retrieve relevant documents via hybrid search
     context_results: list[dict] = []
-    if app.state.embedding_model is not None and app.state.embeddings_cache:
+    if app.state.embedding_model is not None:
         context_results = hybrid_search(
             query=body.message,
             embedding_model=app.state.embedding_model,
-            embeddings_cache=app.state.embeddings_cache,
+            embeddings_cache=_ensure_embeddings_cache(app),
             top_k=RAG_TOP_K_DOCS,
         )
 
@@ -1477,13 +1489,13 @@ async def execute_procedure(
         )
 
         # Step 2: Also try hybrid search for broader coverage
-        if app.state.embedding_model is not None and app.state.embeddings_cache:
+        if app.state.embedding_model is not None:
             try:
                 search_query = f"{label} {body.person_name}"
                 hybrid_results = hybrid_search(
                     query=search_query,
                     embedding_model=app.state.embedding_model,
-                    embeddings_cache=app.state.embeddings_cache,
+                    embeddings_cache=_ensure_embeddings_cache(app),
                     top_k=10,
                 )
                 # Add hybrid results that match the doc_type and aren't already in candidates
@@ -1788,7 +1800,8 @@ async def sync_nas() -> JSONResponse:
         logger.info("NAS sync completed: %s", summary)
         # Upload each discovered file is handled inside sync_from_nas via the API,
         # but refresh embeddings cache after the sync finishes.
-        app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+        if app.state.embeddings_cache is not None:
+            app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
 
     await get_queue().enqueue(label="Synchronisation NAS", fn=_job)
     return JSONResponse(
@@ -1809,7 +1822,8 @@ async def sync_nas_blocking() -> JSONResponse:
 
     loop = asyncio.get_event_loop()
     summary = await loop.run_in_executor(None, sync_from_nas)
-    app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+    if app.state.embeddings_cache is not None:
+        app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
     return JSONResponse(content=summary)
 
 

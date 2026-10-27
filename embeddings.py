@@ -1,10 +1,15 @@
 """Embedding module: sentence-transformers for document vectorization and similarity search."""
 
-import numpy as np
 import logging
-from sentence_transformers import SentenceTransformer
+import threading
 
-from config import EMBEDDING_MODEL_NAME, EMBEDDING_CACHE_DIR
+import numpy as np
+
+from config import (
+    EMBEDDING_MODEL_NAME,
+    EMBEDDING_CACHE_DIR,
+    EMBEDDING_LAZY_LOAD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -12,19 +17,74 @@ logger = logging.getLogger(__name__)
 _MAX_TEXT_CHARS = 5000
 
 
+class LazyEmbeddingModel:
+    """Proxy that loads the sentence-transformer model on first use.
+
+    Loading ``all-MiniLM-L6-v2`` costs ~1 GB of RSS and several seconds.
+    Most idle instances never need it, so startup should not pay that cost.
+    The proxy is thread-safe and otherwise behaves like the real model for
+    the two methods the app uses (``encode`` and
+    ``get_sentence_embedding_dimension``).
+    """
+
+    def __init__(self, model_name: str, cache_dir: str) -> None:
+        self.model_name = model_name
+        self.cache_dir = cache_dir
+        self._model = None
+        self._lock = threading.Lock()
+
+    @property
+    def loaded(self) -> bool:
+        return self._model is not None
+
+    def _ensure(self):
+        if self._model is not None:
+            return self._model
+        with self._lock:
+            if self._model is None:
+                from sentence_transformers import SentenceTransformer
+
+                logger.info("Loading embedding model lazily: %s", self.model_name)
+                self._model = SentenceTransformer(
+                    self.model_name, cache_folder=self.cache_dir
+                )
+                logger.info(
+                    "Embedding model loaded: %s (dimension=%d)",
+                    self.model_name,
+                    self._model.get_sentence_embedding_dimension(),
+                )
+        return self._model
+
+    def encode(self, *args, **kwargs):
+        return self._ensure().encode(*args, **kwargs)
+
+    def get_sentence_embedding_dimension(self):
+        return self._ensure().get_sentence_embedding_dimension()
+
+
 def load_embedding_model(
     model_name: str = EMBEDDING_MODEL_NAME,
     cache_dir: str = EMBEDDING_CACHE_DIR,
-) -> SentenceTransformer:
-    """Load a sentence-transformer model for dense vector embeddings.
+    lazy: bool = EMBEDDING_LAZY_LOAD,
+):
+    """Load (or defer loading of) a sentence-transformer embedding model.
 
     Args:
         model_name: HuggingFace model identifier or local path.
         cache_dir: Directory to cache downloaded model files.
+        lazy: When true, return a :class:`LazyEmbeddingModel` that only
+            imports torch/sentence-transformers and allocates weights on
+            first use.
 
     Returns:
-        Loaded :class:`SentenceTransformer` instance.
+        A loaded model or a lazy proxy exposing the same API.
     """
+    if lazy:
+        logger.info("Embedding model configured for lazy loading: %s", model_name)
+        return LazyEmbeddingModel(model_name, cache_dir)
+
+    from sentence_transformers import SentenceTransformer
+
     model = SentenceTransformer(model_name, cache_folder=cache_dir)
     dim = model.get_sentence_embedding_dimension()
     logger.info(
@@ -34,7 +94,7 @@ def load_embedding_model(
     return model
 
 
-def generate_embedding(model: SentenceTransformer, text: str) -> np.ndarray:
+def generate_embedding(model, text: str) -> np.ndarray:
     """Generate a dense embedding vector for a text string.
 
     The input text is truncated to the first 5 000 characters before
