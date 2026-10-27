@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 import main
 import nas_sync
+import processing_queue
 
 
 @pytest.fixture()
@@ -15,8 +16,10 @@ def client(monkeypatch):
     monkeypatch.setattr(main, "init_llm_client", lambda: None)
     monkeypatch.setattr(main, "load_embedding_model", lambda: None)
     monkeypatch.setattr(nas_sync, "apply_cron_schedule", lambda: {"status": "disabled"})
+    processing_queue._queue = None
     with TestClient(main.app) as test_client:
         yield test_client
+    processing_queue._queue = None
 
 
 def test_check_reports_unknown_hash(client):
@@ -45,7 +48,7 @@ def test_candidate_rejects_wrong_magic(client):
 def test_candidate_rejects_unsupported_extension(client):
     response = client.post(
         "/api/ingest/candidate",
-        files={"file": ("archive.zip", b"PK\x03\x04" + b"0" * 4096, "application/zip")},
+        files={"file": ("archive.zip", b"PK\x03\x04ZIP" + b"1" * 4096, "application/zip")},
     )
     assert response.status_code == 400
 
