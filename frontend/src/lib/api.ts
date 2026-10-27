@@ -17,6 +17,12 @@ export interface Document {
   tags?: string[];
   date_expiration?: string;
   date_echeance?: string;
+  parent_id?: string;
+  page_start?: number;
+  page_end?: number;
+  pages_done?: number;
+  pages_total?: number;
+  ocr_backend?: string;
   status: string;
   created_at: string;
   updated_at: string;

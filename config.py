@@ -127,7 +127,7 @@ OCR_CACHE_DIR = os.path.join(DATA_DIR, "ocr_cache")
 OCR_CACHE_ENABLED = _env_bool("OCR_CACHE_ENABLED", True)
 
 # Long-document handling: split into blocks of pages for MiniCPM map-reduce.
-LLM_MAP_CHUNK_CHARS = int(os.environ.get("LLM_MAP_CHUNK_CHARS", "60000"))
+LLM_MAP_CHUNK_CHARS = int(os.environ.get("LLM_MAP_CHUNK_CHARS", "200000"))
 LLM_MAP_CHUNK_PAGES = int(os.environ.get("LLM_MAP_CHUNK_PAGES", "8"))
 # Enable MiniCPM-based segmentation of multi-document scans.
 SEGMENT_MULTI_DOC = _env_bool("SEGMENT_MULTI_DOC", True)

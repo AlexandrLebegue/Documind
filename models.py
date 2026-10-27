@@ -22,6 +22,12 @@ class DocumentResponse(BaseModel):
     tags: Optional[list[str]] = None
     date_expiration: Optional[str] = None
     date_echeance: Optional[str] = None
+    parent_id: Optional[str] = None
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
+    pages_done: Optional[int] = 0
+    pages_total: Optional[int] = 0
+    ocr_backend: Optional[str] = None
     status: str
     created_at: str
     updated_at: str

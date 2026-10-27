@@ -117,3 +117,76 @@ Réponds UNIQUEMENT avec un objet JSON strict :
 - "reason": une courte explication du choix (1 phrase)
 
 Réponds UNIQUEMENT avec le JSON, sans texte avant ni après, sans blocs de code markdown."""
+
+
+# ---------------------------------------------------------------------------
+# OvisOCR3 prompts (official llama.cpp / OvisOCR3 prompts)
+# ---------------------------------------------------------------------------
+
+OVIS_PLAIN_PROMPT = """Read all the text in the image. Directly output the content.
+
+Rules:
+1. Preserve the original text exactly without translation, paraphrasing, correction, or completion.
+2. Follow the natural human reading order.
+3. Output plain text only. Use spaces and line breaks only to preserve text separation and reading order.
+4. Do not output Markdown, HTML, JSON, bounding boxes, category labels, explanations, or code fences."""
+
+OVIS_MARKDOWN_PROMPT = """Extract all readable content from the image in natural human reading order and output the result as a single Markdown document. For charts or images, represent them using an HTML image tag: <img src="images/bbox_{left}_{top}_{right}_{bottom}.jpg" />, where left, top, right, bottom are bounding box coordinates scaled to [0, 1000). Format formulas as LaTeX. Format tables as HTML: <table>...</table>. Transcribe all other text as standard Markdown. Preserve the original text without translation or paraphrasing."""
+
+
+# ---------------------------------------------------------------------------
+# Segmentation / map-reduce prompts
+# ---------------------------------------------------------------------------
+
+SEGMENTATION_PROMPT = """Tu es un assistant spécialisé dans l'analyse de scans administratifs français.
+On te fournit le texte OCR de chaque page d'un même fichier. Ce fichier peut contenir :
+- un seul document de plusieurs pages, OU
+- plusieurs documents différents scannés à la suite (par exemple plusieurs factures ou plusieurs courriers).
+
+Ta mission : découper les pages en documents distincts.
+
+Règles de découpage :
+- Regroupe les pages qui appartiennent au même document : même émetteur, même en-tête/pied de page, numérotation de page cohérente (« 2/3 »), continuité de date, de numéro de contrat/facture, de destinataire.
+- Ne découpe PAS sur un simple changement de paragraphe ou de tableau.
+- En cas de doute, NE DÉCOUPE PAS : mieux vaut un seul document trop large qu'un découpage erroné.
+- Chaque page doit apparaître dans exactement un segment, dans l'ordre, sans trou ni chevauchement.
+- Les numéros de page sont en base 1.
+
+Types valides : facture, fiche_de_paie, avis_imposition, contrat, attestation, courrier, releve_bancaire, quittance, identite, autre.
+
+Exemples :
+- Un seul document :
+  PAGE 1 : « FACTURE EDF — page 1/2 — contrat n° 123 »
+  PAGE 2 : « FACTURE EDF — page 2/2 — contrat n° 123 »
+  → [{"pages": [1, 2], "type": "facture", "titre": "Facture EDF"}]
+- Deux documents distincts :
+  PAGE 1 : « CARTE NATIONALE D'IDENTITÉ — nom, prénom, date de naissance »
+  PAGE 2 : « CONTRAT DE TRAVAIL — entre la société X et M. Y — article 1 »
+  → [{"pages": [1, 1], "type": "identite", "titre": "Carte nationale d'identité"}, {"pages": [2, 2], "type": "contrat", "titre": "Contrat de travail"}]
+
+Si deux pages ont des émetteurs, des titres ou des types de document manifestement différents, tu DOIS les séparer.
+
+Réponds UNIQUEMENT avec un tableau JSON, sans texte avant ni après, sans bloc de code markdown :
+[{"pages": [debut, fin], "type": "facture", "titre": "Titre court et descriptif"}]
+
+Si le fichier ne contient qu'un seul document, réponds avec un seul élément couvrant toutes les pages."""
+
+METADATA_MERGE_PROMPT = """Tu reçois les métadonnées partielles extraites de plusieurs blocs d'un même document long.
+Fusionne-les en un seul objet JSON cohérent, sans rien inventer.
+- Garde le type le plus précis, l'émetteur principal, la date du document (pas celle d'un échéancier), le montant principal (le total), la référence principale.
+- Le titre et le résumé doivent décrire l'ensemble du document.
+- Fusionne les tags sans doublons (3-5 mots-clés).
+Réponds UNIQUEMENT avec le JSON final, sans texte avant ni après ni bloc de code."""
+
+OCR_TEXT_ONLY_NOTE = """Le texte ci-dessous a été extrait par OCR. Il peut contenir des erreurs de reconnaissance (caractères isolés, coupures de mots, tableaux aplatis). Interprète-le avec prudence sans inventer d'information absente."""
+
+
+def segmentation_user_message(pages: list[str], max_chars_per_page: int = 1400) -> str:
+    """Build the user message sent to MiniCPM for page segmentation."""
+    parts: list[str] = []
+    for i, text in enumerate(pages, 1):
+        snippet = (text or "").strip()
+        if len(snippet) > max_chars_per_page:
+            snippet = snippet[:max_chars_per_page] + " […]"
+        parts.append(f"--- PAGE {i} ---\n{snippet}")
+    return "\n\n".join(parts)

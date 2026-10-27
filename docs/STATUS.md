@@ -19,13 +19,16 @@
 - Démarrage (LXC 105) : RSS 473 Mo → 32 Mo, embeddings différés (`docs/PERF.md`).
 - SQLite 1 000 docs : `init_db` 17,6 → 1,1 ms, `list` 6,8 → 0,5 ms, `stats` 9,1 → 0,6 ms.
 - OvisOCR3 8081 OK ; MiniCPM 8080 relancé par ProxBoss, health OK.
+- OCR DPI retenu : **130**. CI.pdf : 100 DPI 23,9 s / 495 car. (champs prénom/lieu manquants), 130 DPI 34,8 s / 515 car., 150 DPI 45,1 s / 551 car. (+4 lignes, dont MRZ/taille). 130 = meilleur compromis.
+- Pipeline complet mesuré : CI.pdf 1 page = ~21 s (OCR + MiniCPM + embedding) ; scan 2 documents = segmentation OK (2 enfants, textes/métadonnées/embeddings séparés).
+- Service LXC 105 : RSS ~114 Mo au repos (embeddings non chargés).
 
 ## TODO
 - [x] A. Profiling + optimisations mesurées
-- [ ] Déploiement LXC 105
-- [ ] B. Backend OCR `ovis`
-- [ ] C. MiniCPM texte seul
-- [ ] D. Segmentation multi-documents
+- [x] Déploiement LXC 105 (service `documind` actif, port 8000, UI servie)
+- [x] B. Backend OCR `ovis` (cache page, progression, repli Tesseract)
+- [x] C. MiniCPM texte seul (thinking off, JSON robuste, map-reduce)
+- [x] D. Segmentation multi-documents (champs parent_id/page_start/page_end)
 - [ ] E. CLI + skill
 - [ ] F. Bench
 - [ ] G. README / .env.example

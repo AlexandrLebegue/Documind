@@ -1,46 +1,140 @@
-"""Document processing pipeline: OCR → image extraction → LLM multimodal metadata → embedding."""
+"""Document processing pipeline: OCR → segmentation → text-only LLM → embedding."""
+
+from __future__ import annotations
 
 import logging
 import traceback
+import uuid
 from pathlib import Path
 
 import httpx
 
-from ocr import extract_text, extract_images_as_base64
-from llm import extract_metadata
+from config import OCR_BACKEND
+from ocr import extract_pages
+from llm import extract_metadata, segment_documents
 from embeddings import generate_embedding, serialize_embedding
 from database import (
     update_document_text,
     update_document_metadata,
     update_document_embedding,
     update_document_status,
+    update_document_progress,
+    update_document_fields,
+    insert_document,
     get_document,
+    get_child_documents,
+    delete_document as db_delete_document,
 )
 
 logger = logging.getLogger(__name__)
 
 
 def _save_metadata(doc_id: str, metadata: dict) -> None:
-    """Persist LLM-extracted metadata (including title) to the database.
-
-    Args:
-        doc_id: UUID of the document record.
-        metadata: Dict returned by :func:`llm.extract_metadata`.
-    """
+    """Persist LLM-extracted metadata (including title) to the database."""
     update_document_metadata(
         doc_id,
-        doc_type=metadata["type"],
-        emetteur=metadata["emetteur"],
-        doc_date=metadata["date"],
+        doc_type=metadata.get("type", "autre"),
+        emetteur=metadata.get("emetteur", ""),
+        doc_date=metadata.get("date", ""),
         montant=metadata.get("montant"),
         reference=metadata.get("reference"),
         destinataire=metadata.get("destinataire"),
-        resume=metadata["resume"],
+        resume=metadata.get("resume", ""),
         tags=metadata.get("tags", []),
         title=metadata.get("titre"),
         date_expiration=metadata.get("date_expiration"),
         date_echeance=metadata.get("date_echeance"),
     )
+
+
+def _join_pages(pages: list[str], offset: int = 0) -> str:
+    """Join page texts with explicit page markers (1-based, *offset* added)."""
+    return "\n\n".join(
+        f"--- Page {offset + i + 1} ---\n\n{text}"
+        for i, text in enumerate(pages)
+    )
+
+
+def _split_page_markers(text: str) -> list[str]:
+    """Parse a stored text blob back into page texts."""
+    import re
+
+    if not text:
+        return []
+    parts = re.split(r"--- Page \d+ ---\s*", text)
+    pages = [p.strip() for p in parts[1:]] if parts and parts[0].strip() == "" else []
+    return pages or [text.strip()]
+
+
+def _segment_filename(original: str, start: int, end: int) -> str:
+    path = Path(original)
+    suffix = path.suffix or ".pdf"
+    return f"{path.stem} (p.{start}-{end}){suffix}"
+
+
+def _process_segment(
+    doc_id: str,
+    file_path: str,
+    pages: list[str],
+    page_start: int,
+    llm: httpx.Client,
+    embedding_model,
+    segment_title: str | None = None,
+) -> bool:
+    """Run metadata + embedding for one document (or one segment).
+
+    Returns True on success, False if the document was marked as errored.
+    """
+    text = _join_pages(pages, offset=page_start - 1)
+    try:
+        update_document_text(doc_id, text)
+        update_document_fields(
+            doc_id,
+            page_start=page_start,
+            page_end=page_start + len(pages) - 1,
+            pages_done=len(pages),
+            pages_total=len(pages),
+            ocr_backend=OCR_BACKEND,
+        )
+        metadata = extract_metadata(llm, text)
+        if segment_title and (
+            not metadata.get("titre")
+            or metadata.get("titre") in ("Document sans titre", "Document non classifié")
+        ):
+            metadata["titre"] = segment_title
+        _save_metadata(doc_id, metadata)
+        logger.info(
+            "Metadata ready for %s (type=%s, titre='%s')",
+            doc_id[:8],
+            metadata.get("type"),
+            metadata.get("titre", ""),
+        )
+    except Exception:
+        logger.error(
+            "Metadata step failed for doc %s:\n%s", doc_id, traceback.format_exc()
+        )
+        update_document_status(doc_id, "error")
+        return False
+
+    try:
+        embedding = generate_embedding(embedding_model, text)
+        update_document_embedding(doc_id, serialize_embedding(embedding))
+    except Exception:
+        logger.error(
+            "Embedding step failed for doc %s:\n%s", doc_id, traceback.format_exc()
+        )
+        update_document_status(doc_id, "error")
+        return False
+
+    update_document_status(doc_id, "ready")
+    logger.info("Document %s ready (%d page(s))", doc_id[:8], len(pages))
+    return True
+
+
+def _delete_previous_children(doc_id: str) -> None:
+    for child in get_child_documents(doc_id):
+        logger.info("Removing previous segment %s", child["id"][:8])
+        db_delete_document(child["id"])
 
 
 def process_document(
@@ -49,98 +143,100 @@ def process_document(
     llm: httpx.Client,
     embedding_model,
 ) -> None:
-    """Run the full document processing pipeline.
+    """Run the full pipeline for a freshly uploaded document.
 
-    Orchestrates four sequential stages — OCR text extraction, image
-    extraction for vision, LLM-based multimodal metadata extraction,
-    and embedding generation — persisting results to the database after
-    each stage.  On any failure the document status is set to ``"error"``
-    and the exception is logged (never re-raised, as this runs as a
-    background task).
-
-    Args:
-        doc_id: UUID of the document record in the database.
-        file_path: Path to the original document file on disk.
-        llm: Pre-configured :class:`httpx.Client` for OpenRouter API calls.
-        embedding_model: Loaded :class:`SentenceTransformer` instance.
+    OCR page by page (OvisOCR3 / Tesseract), persist progress per page,
+    segment multi-document scans, then extract metadata and embeddings for
+    each resulting document. Failures set the document status to ``error``.
     """
     logger.info("Starting processing pipeline for document %s (%s)", doc_id, file_path)
+    doc = get_document(doc_id)
+    if doc is None:
+        logger.error("Document %s not found in database", doc_id)
+        return
+    if llm is None:
+        logger.error("No LLM client available — cannot process %s", doc_id)
+        update_document_status(doc_id, "error")
+        return
 
-    text: str = ""
-    images: list[str] = []
+    def _progress(done: int, total: int) -> None:
+        try:
+            update_document_progress(doc_id, done, total, OCR_BACKEND)
+        except Exception:
+            logger.debug("Could not persist OCR progress", exc_info=True)
 
-    # ── Step 1 — OCR / text extraction ──────────────────────────────────
     try:
-        text = extract_text(file_path)
-        update_document_text(doc_id, text)
-        logger.info(
-            "Step 1 complete: text extracted (%d chars) for doc %s",
-            len(text), doc_id,
+        pages = extract_pages(file_path, progress_cb=_progress)
+    except Exception:
+        logger.error(
+            "OCR failed for doc %s:\n%s", doc_id, traceback.format_exc()
         )
-        if len(text) < 10:
-            logger.warning(
-                "Extracted text is very short (%d chars) for doc %s — "
-                "vision analysis will help compensate",
-                len(text), doc_id,
+        update_document_status(doc_id, "error")
+        return
+
+    if not pages:
+        pages = [""]
+    total = len(pages)
+    update_document_progress(doc_id, total, total, OCR_BACKEND)
+
+    try:
+        segments = segment_documents(llm, pages)
+    except Exception:
+        logger.warning("Segmentation failed — keeping a single document", exc_info=True)
+        segments = [{"pages": [1, total], "type": None, "titre": None}]
+
+    if len(segments) > 1:
+        _delete_previous_children(doc_id)
+
+        # The original row becomes a lightweight source container; the OCR
+        # text lives on the child documents to avoid duplicate search hits.
+        update_document_fields(
+            doc_id,
+            title=f"{Path(doc['filename']).stem} (source, {len(segments)} documents)",
+            doc_type="autre",
+            resume=f"Scan contenant {len(segments)} documents distincts",
+            text_content="",
+            status="segmented",
+            pages_done=total,
+            pages_total=total,
+            ocr_backend=OCR_BACKEND,
+        )
+
+        for segment in segments:
+            start, end = segment["pages"]
+            child_pages = pages[start - 1:end]
+            child_id = str(uuid.uuid4())
+            child_name = _segment_filename(doc["filename"], start, end)
+            insert_document(
+                child_id,
+                child_name,
+                file_path,
+                parent_id=doc_id,
+                page_start=start,
+                page_end=end,
             )
-    except Exception:
-        logger.error(
-            "Step 1 failed (OCR) for doc %s:\n%s",
-            doc_id, traceback.format_exc(),
+            _process_segment(
+                child_id,
+                file_path,
+                child_pages,
+                page_start=start,
+                llm=llm,
+                embedding_model=embedding_model,
+                segment_title=segment.get("titre"),
+            )
+        logger.info(
+            "Segmented document %s into %d document(s)", doc_id[:8], len(segments)
         )
-        update_document_status(doc_id, "error")
         return
 
-    # ── Step 1b — Extract page images for vision analysis ───────────────
-    try:
-        images = extract_images_as_base64(file_path, max_pages=3)
-        logger.info(
-            "Step 1b complete: %d image(s) extracted for vision for doc %s",
-            len(images), doc_id,
-        )
-    except Exception:
-        logger.warning(
-            "Step 1b failed (image extraction) for doc %s — "
-            "continuing with text-only analysis:\n%s",
-            doc_id, traceback.format_exc(),
-        )
-        images = []
-
-    # ── Step 2 — LLM multimodal metadata extraction ─────────────────────
-    try:
-        metadata = extract_metadata(llm, text, images=images)
-        _save_metadata(doc_id, metadata)
-        logger.info(
-            "Step 2 complete: metadata extracted (type=%s, title='%s') for doc %s",
-            metadata["type"], metadata.get("titre", ""), doc_id,
-        )
-    except Exception:
-        logger.error(
-            "Step 2 failed (LLM metadata) for doc %s:\n%s",
-            doc_id, traceback.format_exc(),
-        )
-        update_document_status(doc_id, "error")
-        return
-
-    # ── Step 3 — Embedding generation ───────────────────────────────────
-    try:
-        embedding = generate_embedding(embedding_model, text)
-        update_document_embedding(doc_id, serialize_embedding(embedding))
-        logger.info(
-            "Step 3 complete: embedding generated (dim=%d) for doc %s",
-            embedding.shape[0], doc_id,
-        )
-    except Exception:
-        logger.error(
-            "Step 3 failed (embedding) for doc %s:\n%s",
-            doc_id, traceback.format_exc(),
-        )
-        update_document_status(doc_id, "error")
-        return
-
-    # ── Step 4 — Finalise ───────────────────────────────────────────────
-    update_document_status(doc_id, "ready")
-    logger.info("Document processing complete for doc %s — status set to 'ready'", doc_id)
+    _process_segment(
+        doc_id,
+        file_path,
+        pages,
+        page_start=1,
+        llm=llm,
+        embedding_model=embedding_model,
+    )
 
 
 def reprocess_document(
@@ -148,113 +244,79 @@ def reprocess_document(
     llm: httpx.Client,
     embedding_model,
 ) -> None:
-    """Re-run the processing pipeline for an existing document.
+    """Re-run the pipeline for an existing document.
 
-    If the document already has ``text_content``, the OCR step is skipped
-    and only metadata extraction and embedding generation are performed.
-    Image extraction is always performed from the original file to provide
-    vision context to the LLM.
-
-    Args:
-        doc_id: UUID of the document record in the database.
-        llm: Pre-configured :class:`httpx.Client` for OpenRouter API calls.
-        embedding_model: Loaded :class:`SentenceTransformer` instance.
+    Documents with existing text skip OCR and only refresh metadata +
+    embedding. Segment documents reprocess their own page range. A source
+    document with children is fully re-segmented (old children are removed).
     """
     logger.info("Reprocessing document %s", doc_id)
-
     doc = get_document(doc_id)
     if doc is None:
         logger.error("Document %s not found in database — cannot reprocess", doc_id)
         return
 
-    text: str = doc.get("text_content") or ""
-    file_path: str = doc.get("filepath", "")
-    images: list[str] = []
+    file_path = doc.get("filepath", "")
+    text = (doc.get("text_content") or "").strip()
 
-    # If no existing text, re-run OCR from the original file
-    if len(text.strip()) == 0:
-        if not file_path or not Path(file_path).exists():
-            logger.error(
-                "Cannot reprocess doc %s: no text_content and file not found at '%s'",
-                doc_id, file_path,
-            )
-            update_document_status(doc_id, "error")
-            return
-
-        try:
-            text = extract_text(file_path)
-            update_document_text(doc_id, text)
-            logger.info(
-                "Reprocess OCR complete: extracted %d chars for doc %s",
-                len(text), doc_id,
-            )
-        except Exception:
-            logger.error(
-                "Reprocess OCR failed for doc %s:\n%s",
-                doc_id, traceback.format_exc(),
-            )
-            update_document_status(doc_id, "error")
-            return
-    else:
-        logger.info(
-            "Skipping OCR for doc %s — existing text_content (%d chars)",
-            doc_id, len(text),
+    # Segment child with existing text: metadata + embedding only.
+    if doc.get("parent_id") and text:
+        start = int(doc.get("page_start") or 1)
+        _process_segment(
+            doc_id,
+            file_path,
+            _split_page_markers(text),
+            page_start=start,
+            llm=llm,
+            embedding_model=embedding_model,
         )
+        return
 
-    # ── Extract page images for vision analysis (always) ────────────────
-    if file_path and Path(file_path).exists():
-        try:
-            images = extract_images_as_base64(file_path, max_pages=3)
-            logger.info(
-                "Reprocess image extraction: %d image(s) for doc %s",
-                len(images), doc_id,
-            )
-        except Exception:
-            logger.warning(
-                "Reprocess image extraction failed for doc %s — "
-                "continuing with text-only:\n%s",
-                doc_id, traceback.format_exc(),
-            )
-            images = []
-    else:
-        logger.warning(
-            "Original file not found at '%s' for doc %s — "
-            "skipping vision analysis",
-            file_path, doc_id,
+    # Normal document with existing text: metadata + embedding only.
+    if text and doc.get("status") != "segmented":
+        _process_segment(
+            doc_id,
+            file_path,
+            _split_page_markers(text),
+            page_start=int(doc.get("page_start") or 1),
+            llm=llm,
+            embedding_model=embedding_model,
         )
+        return
 
-    # ── LLM multimodal metadata extraction ──────────────────────────────
-    try:
-        metadata = extract_metadata(llm, text, images=images)
-        _save_metadata(doc_id, metadata)
-        logger.info(
-            "Reprocess metadata complete (type=%s, title='%s') for doc %s",
-            metadata["type"], metadata.get("titre", ""), doc_id,
-        )
-    except Exception:
+    if not file_path or not Path(file_path).exists():
         logger.error(
-            "Reprocess metadata failed for doc %s:\n%s",
-            doc_id, traceback.format_exc(),
+            "Cannot reprocess doc %s: file not found at '%s'", doc_id, file_path
         )
         update_document_status(doc_id, "error")
         return
 
-    # ── Embedding generation ────────────────────────────────────────────
+    # Re-OCR from the original file (OCR page cache makes this cheap).
+    def _progress(done: int, total: int) -> None:
+        try:
+            update_document_progress(doc_id, done, total, OCR_BACKEND)
+        except Exception:
+            logger.debug("Could not persist OCR progress", exc_info=True)
+
     try:
-        embedding = generate_embedding(embedding_model, text)
-        update_document_embedding(doc_id, serialize_embedding(embedding))
-        logger.info(
-            "Reprocess embedding complete (dim=%d) for doc %s",
-            embedding.shape[0], doc_id,
-        )
+        pages = extract_pages(file_path, progress_cb=_progress)
     except Exception:
-        logger.error(
-            "Reprocess embedding failed for doc %s:\n%s",
-            doc_id, traceback.format_exc(),
-        )
+        logger.error("Reprocess OCR failed for doc %s:\n%s", doc_id, traceback.format_exc())
         update_document_status(doc_id, "error")
         return
 
-    # ── Finalise ────────────────────────────────────────────────────────
-    update_document_status(doc_id, "ready")
-    logger.info("Document reprocessing complete for doc %s — status set to 'ready'", doc_id)
+    if doc.get("parent_id"):
+        start = int(doc.get("page_start") or 1)
+        end = int(doc.get("page_end") or len(pages))
+        _process_segment(
+            doc_id,
+            file_path,
+            pages[start - 1:end],
+            page_start=start,
+            llm=llm,
+            embedding_model=embedding_model,
+        )
+        return
+
+    # Source document: rerun the full pipeline (segmentation included).
+    process_document(doc_id, file_path, llm, embedding_model)

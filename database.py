@@ -262,22 +262,35 @@ def init_db() -> None:
 # Document CRUD
 # ---------------------------------------------------------------------------
 
-def insert_document(doc_id: str, filename: str, filepath: str) -> None:
+def insert_document(
+    doc_id: str,
+    filename: str,
+    filepath: str,
+    parent_id: str | None = None,
+    page_start: int | None = None,
+    page_end: int | None = None,
+) -> None:
     """Insert a new document record with status 'processing'.
 
     Args:
         doc_id: UUID string for the document.
         filename: Original filename as uploaded.
         filepath: Path to the stored original file on disk.
+        parent_id: For a segment extracted from a multi-document scan, the
+            UUID of the original source document.
+        page_start: First page of this segment (1-based).
+        page_end: Last page of this segment (1-based).
     """
     now = _now_iso()
     with _get_connection() as conn:
         conn.execute(
             """
-            INSERT INTO documents (id, filename, filepath, status, created_at, updated_at)
-            VALUES (?, ?, ?, 'processing', ?, ?);
+            INSERT INTO documents
+                (id, filename, filepath, status, parent_id, page_start,
+                 page_end, created_at, updated_at)
+            VALUES (?, ?, ?, 'processing', ?, ?, ?, ?, ?);
             """,
-            (doc_id, filename, filepath, now, now),
+            (doc_id, filename, filepath, parent_id, page_start, page_end, now, now),
         )
         conn.commit()
 
@@ -368,6 +381,27 @@ def update_document_embedding(doc_id: str, embedding_blob: bytes) -> None:
         conn.commit()
 
 
+def update_document_progress(
+    doc_id: str,
+    pages_done: int,
+    pages_total: int,
+    ocr_backend: str | None = None,
+) -> None:
+    """Persist per-page OCR progress so the UI can display advancement."""
+    now = _now_iso()
+    with _get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE documents
+            SET pages_done = ?, pages_total = ?,
+                ocr_backend = COALESCE(?, ocr_backend), updated_at = ?
+            WHERE id = ?;
+            """,
+            (pages_done, pages_total, ocr_backend, now, doc_id),
+        )
+        conn.commit()
+
+
 def update_document_status(doc_id: str, status: str) -> None:
     """Update the processing status of a document.
 
@@ -444,6 +478,7 @@ def _build_filter_clauses(
     date_from: str | None = None,
     date_to: str | None = None,
     q: str | None = None,
+    exclude_segmented: bool = True,
 ) -> tuple[str, str, list[Any]]:
     """Build shared FROM/JOIN and WHERE fragments for document queries.
 
@@ -479,6 +514,8 @@ def _build_filter_clauses(
     if date_to is not None:
         conditions.append("d.doc_date <= ?")
         params.append(date_to)
+    if exclude_segmented:
+        conditions.append("(d.status IS NULL OR d.status != 'segmented')")
 
     where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
     return base, where, params
@@ -492,6 +529,7 @@ def list_documents(
     q: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    exclude_segmented: bool = True,
 ) -> list[dict[str, Any]]:
     """Return a filtered and paginated list of documents.
 
@@ -510,6 +548,7 @@ def list_documents(
     base, where, params = _build_filter_clauses(
         doc_type=doc_type, emetteur=emetteur,
         date_from=date_from, date_to=date_to, q=q,
+        exclude_segmented=exclude_segmented,
     )
     sql = f"{base}{where} ORDER BY d.created_at DESC LIMIT ? OFFSET ?;"
     params.extend([limit, offset])
@@ -525,6 +564,7 @@ def count_documents(
     date_from: str | None = None,
     date_to: str | None = None,
     q: str | None = None,
+    exclude_segmented: bool = True,
 ) -> int:
     """Return the total number of documents matching the given filters.
 
@@ -534,6 +574,7 @@ def count_documents(
     base, where, params = _build_filter_clauses(
         doc_type=doc_type, emetteur=emetteur,
         date_from=date_from, date_to=date_to, q=q,
+        exclude_segmented=exclude_segmented,
     )
     # Replace the SELECT columns with COUNT(*)
     count_base = re.sub(r"SELECT .+? FROM", "SELECT COUNT(*) AS cnt FROM", base, count=1)
@@ -562,6 +603,8 @@ def update_document_fields(doc_id: str, **fields: Any) -> None:
         "doc_date", "montant", "reference", "destinataire", "resume",
         "tags", "embedding", "status",
         "date_expiration", "date_echeance",
+        "parent_id", "page_start", "page_end",
+        "pages_done", "pages_total", "ocr_backend",
     }
     to_update = {k: v for k, v in fields.items() if k in allowed}
     if not to_update:
@@ -597,10 +640,18 @@ def delete_document(doc_id: str) -> None:
             (doc_id,),
         ).fetchone()
         conn.execute("DELETE FROM documents WHERE id = ?;", (doc_id,))
+        # Segments share the original file path: only delete the file when no
+        # other document row still references it.
+        still_used = False
+        if row and row["filepath"]:
+            still_used = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM documents WHERE filepath = ?;",
+                (row["filepath"],),
+            ).fetchone()["cnt"] > 0
         conn.commit()
 
-    # Remove original file from disk (best-effort)
-    if row and row["filepath"]:
+    # Remove original file from disk (best-effort, only if not shared)
+    if row and row["filepath"] and not still_used:
         try:
             os.remove(row["filepath"])
         except OSError:
@@ -902,14 +953,16 @@ def get_stats() -> dict[str, Any]:
 
     with _get_connection() as conn:
         # Total count
-        total = conn.execute("SELECT COUNT(*) AS cnt FROM documents;").fetchone()["cnt"]
+        total = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM documents WHERE status != 'segmented';"
+        ).fetchone()["cnt"]
 
         # Count by type
         type_rows = conn.execute(
             """
             SELECT doc_type, COUNT(*) AS cnt
             FROM documents
-            WHERE doc_type IS NOT NULL
+            WHERE doc_type IS NOT NULL AND status != 'segmented'
             GROUP BY doc_type
             ORDER BY cnt DESC;
             """
@@ -921,6 +974,7 @@ def get_stats() -> dict[str, Any]:
             """
             SELECT SUBSTR(created_at, 1, 7) AS month, COUNT(*) AS cnt
             FROM documents
+            WHERE status != 'segmented'
             GROUP BY month
             ORDER BY month DESC;
             """
@@ -929,7 +983,8 @@ def get_stats() -> dict[str, Any]:
 
         # Recent documents (last 10)
         recent_rows = conn.execute(
-            "SELECT * FROM documents ORDER BY created_at DESC LIMIT 10;"
+            "SELECT * FROM documents WHERE status != 'segmented' "
+            "ORDER BY created_at DESC LIMIT 10;"
         ).fetchall()
         recent_documents = [_row_to_dict(row) for row in recent_rows]
 
@@ -1359,3 +1414,27 @@ def search_documents_by_type_and_name(
              name_pattern, name_pattern, name_pattern, limit),
         ).fetchall()
     return [_row_to_dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Multi-document segmentation helpers
+# ---------------------------------------------------------------------------
+
+def get_child_documents(parent_id: str) -> list[dict[str, Any]]:
+    """Return all segment documents derived from *parent_id*."""
+    with _get_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM documents WHERE parent_id = ? ORDER BY page_start ASC;",
+            (parent_id,),
+        ).fetchall()
+    return [_row_to_dict(row) for row in rows]
+
+
+def get_document_count_for_file(filepath: str) -> int:
+    """Return how many document rows reference the same original file."""
+    with _get_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM documents WHERE filepath = ?;",
+            (filepath,),
+        ).fetchone()
+    return row["cnt"] if row else 0

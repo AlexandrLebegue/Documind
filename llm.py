@@ -11,16 +11,22 @@ import config as _cfg
 from prompts import (
     METADATA_EXTRACTION_PROMPT,
     METADATA_CORRECTION_PROMPT,
+    METADATA_MERGE_PROMPT,
+    OCR_TEXT_ONLY_NOTE,
     RAG_CHAT_PROMPT,
+    SEGMENTATION_PROMPT,
     VALID_DOC_TYPES,
     PROCEDURE_ANALYSIS_PROMPT,
     PROCEDURE_MATCH_PROMPT,
+    segmentation_user_message,
 )
 
 logger = logging.getLogger(__name__)
 
-# Maximum characters of OCR text to send to the LLM (~2000 tokens)
-_MAX_OCR_CHARS = 8000
+# Maximum characters of OCR text sent in a single call. Beyond this we use a
+# map-reduce strategy (chunks of pages + merge). ~4 chars ≈ 1 token, and the
+# MiniCPM server exposes a 98k-token context.
+_MAX_OCR_CHARS = _cfg.LLM_MAP_CHUNK_CHARS
 
 # Maximum number of images to include in a multimodal request
 _MAX_IMAGES = 3
@@ -143,7 +149,18 @@ def _call_llm(
         httpx.HTTPStatusError: If the API returns a non-2xx status.
         KeyError: If the response structure is unexpected.
     """
-    # Build user content — multimodal if images are provided
+    # MiniCPM5-2B is a TEXT-ONLY model. Never send images to the llamacpp
+    # provider, even if a caller still passes some (e.g. legacy procedure
+    # analysis path). Images are handled upstream by OvisOCR3.
+    text_only = _cfg.AI_PROVIDER == "llamacpp"
+    if text_only and images:
+        logger.info(
+            "Ignoring %d image(s): the llamacpp provider is text-only",
+            len(images),
+        )
+        images = None
+
+    # Build user content — multimodal only for vision-capable providers
     if images:
         user_content: list[dict] | str = [
             {"type": "text", "text": user_message},
@@ -172,6 +189,8 @@ def _call_llm(
         "max_tokens": max_tokens,
         "max_completion_tokens": max_tokens,
     }
+    if text_only and _cfg.LLM_DISABLE_THINKING:
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
 
     response = client.post("/chat/completions", json=payload)
     response.raise_for_status()
@@ -203,6 +222,87 @@ def _call_llm(
     return content
 
 
+def _strip_code_fences(text: str) -> str:
+    """Remove a surrounding Markdown code fence, if present."""
+    text = text.strip()
+    fence = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if fence:
+        return fence.group(1).strip()
+    return text
+
+
+def _balanced_json_text(text: str, opener: str) -> str | None:
+    """Return the first balanced JSON value starting at *opener*.
+
+    Handles strings, escapes and truncated output (the missing closing
+    brackets/quote are appended automatically).
+    """
+    start = text.find(opener)
+    if start == -1:
+        return None
+
+    stack: list[str] = []
+    in_string = False
+    escaped = False
+    for index in range(start, len(text)):
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char in "{[":
+            stack.append(char)
+        elif char in "}]":
+            if not stack:
+                break
+            expected = "}" if stack[-1] == "{" else "]"
+            if char != expected:
+                break
+            stack.pop()
+            if not stack:
+                return text[start:index + 1]
+
+    # Truncated response: close the open string and structures.
+    fragment = text[start:]
+    if in_string:
+        fragment += '"'
+    for char in reversed(stack):
+        fragment += "}" if char == "{" else "]"
+    return fragment
+
+
+def _extract_json(response_text: str, opener: str = "{"):
+    """Extract a JSON object/array from an LLM response, with repair.
+
+    Tries a direct parse, then a balanced-bracket extraction, then a repair
+    of trailing commas. Returns ``None`` when nothing usable is found.
+    """
+    text = _strip_code_fences(response_text)
+    candidates: list[str] = [text]
+
+    balanced = _balanced_json_text(text, opener)
+    if balanced and balanced != text:
+        candidates.append(balanced)
+
+    for candidate in list(candidates):
+        repaired = re.sub(r",\s*([}\]])", r"\1", candidate)
+        if repaired != candidate:
+            candidates.append(repaired)
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return None
+
+
 def _parse_and_validate_metadata(response_text: str) -> Optional[dict]:
     """Parse LLM output into a validated metadata dictionary.
 
@@ -217,44 +317,7 @@ def _parse_and_validate_metadata(response_text: str) -> Optional[dict]:
     Returns:
         Validated metadata dict, or ``None`` on failure.
     """
-    parsed: Optional[dict] = None
-    text = response_text.strip()
-
-    # Strategy 0: strip markdown code fences (```json ... ``` or ``` ... ```)
-    fence_match = re.search(r'```(?:json)?\s*\n?(.*?)```', text, re.DOTALL)
-    if fence_match:
-        text = fence_match.group(1).strip()
-        logger.debug("Stripped markdown code fence from LLM response")
-
-    # Strategy 1: try parsing the entire stripped response directly
-    try:
-        parsed = json.loads(text)
-    except (json.JSONDecodeError, TypeError):
-        pass
-
-    # Strategy 2: extract substring between first '{' and last '}'
-    if parsed is None:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            try:
-                parsed = json.loads(text[start : end + 1])
-            except (json.JSONDecodeError, TypeError):
-                pass
-
-    # Strategy 3: repair truncated JSON — append missing closing brackets
-    if parsed is None:
-        start = text.find("{")
-        if start != -1:
-            fragment = text[start:]
-            # Count open/close braces and brackets to determine what's missing
-            for suffix in ["}", "]}", "\"]}",  "\"]}", "\"\n  ]\n}"]:
-                try:
-                    parsed = json.loads(fragment + suffix)
-                    logger.info("Strategy 3 (JSON repair) succeeded with suffix: %r", suffix)
-                    break
-                except (json.JSONDecodeError, TypeError):
-                    continue
+    parsed = _extract_json(response_text, "{")
 
     if not isinstance(parsed, dict):
         logger.warning("Failed to extract JSON object from LLM response")
@@ -322,37 +385,170 @@ def _parse_and_validate_metadata(response_text: str) -> Optional[dict]:
     return parsed
 
 
+def _chunk_text(text: str, max_chars: int) -> list[str]:
+    """Split a long OCR text into page-aware chunks of at most *max_chars*."""
+    if len(text) <= max_chars:
+        return [text]
+
+    parts = re.split(r"(?=--- Page \d+ ---)", text)
+    chunks: list[str] = []
+    current = ""
+    for part in parts:
+        if not part:
+            continue
+        if len(current) + len(part) > max_chars and current:
+            chunks.append(current)
+            current = part
+        else:
+            current += part
+        # A single page can itself exceed the limit.
+        while len(current) > max_chars:
+            chunks.append(current[:max_chars])
+            current = current[max_chars:]
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _merge_partial_metadata(partials: list[dict]) -> dict:
+    """Heuristic merge used when the LLM merge step fails."""
+    if not partials:
+        return _fallback_metadata()
+
+    def first(key: str, default=None):
+        for item in partials:
+            value = item.get(key)
+            if value not in (None, "", []):
+                return value
+        return default
+
+    types = [p.get("type") for p in partials if p.get("type") in VALID_DOC_TYPES]
+    montants = [p["montant"] for p in partials if isinstance(p.get("montant"), (int, float))]
+    tags: list[str] = []
+    for item in partials:
+        for tag in item.get("tags") or []:
+            if tag not in tags:
+                tags.append(tag)
+
+    return {
+        "titre": first("titre", "Document long"),
+        "type": max(set(types), key=types.count) if types else "autre",
+        "emetteur": first("emetteur", ""),
+        "date": first("date", ""),
+        "montant": max(montants) if montants else None,
+        "reference": first("reference"),
+        "destinataire": first("destinataire"),
+        "resume": first("resume", "Document long fusionné"),
+        "tags": tags[:5],
+        "date_expiration": first("date_expiration"),
+        "date_echeance": first("date_echeance"),
+    }
+
+
+def _fallback_metadata() -> dict:
+    return {
+        "titre": "Document non classifié",
+        "type": "autre",
+        "emetteur": "",
+        "date": "",
+        "montant": None,
+        "reference": None,
+        "destinataire": None,
+        "resume": "Classification automatique échouée",
+        "tags": [],
+        "date_expiration": None,
+        "date_echeance": None,
+    }
+
+
+def _metadata_for_chunk(client, chunk: str, index: int, total: int) -> dict | None:
+    """Extract metadata from one chunk of a long document (map step)."""
+    user_message = (
+        f"{OCR_TEXT_ONLY_NOTE}\n\n"
+        f"Ceci est le bloc {index}/{total} d'un document long. "
+        "Extrais les métadonnées visibles dans CE BLOC uniquement.\n\n"
+        f"{chunk}"
+    )
+    try:
+        raw = _call_llm(
+            client,
+            system_prompt=METADATA_EXTRACTION_PROMPT,
+            user_message=user_message,
+        )
+        return _parse_and_validate_metadata(raw)
+    except Exception:
+        logger.exception("Map metadata extraction failed for chunk %d/%d", index, total)
+        return None
+
+
+def _extract_metadata_map_reduce(client, ocr_text: str) -> dict:
+    """Map-reduce metadata extraction for documents above the context budget."""
+    chunks = _chunk_text(ocr_text, _cfg.LLM_MAP_CHUNK_CHARS)
+    logger.info(
+        "Long document (%d chars) — map-reduce metadata over %d chunk(s)",
+        len(ocr_text),
+        len(chunks),
+    )
+    partials = [
+        metadata
+        for i, chunk in enumerate(chunks, 1)
+        if (metadata := _metadata_for_chunk(client, chunk, i, len(chunks))) is not None
+    ]
+    if not partials:
+        return _fallback_metadata()
+
+    # Reduce step: let the LLM merge the partial metadata.
+    try:
+        raw = _call_llm(
+            client,
+            system_prompt=METADATA_MERGE_PROMPT,
+            user_message=json.dumps(partials, ensure_ascii=False),
+        )
+        merged = _parse_and_validate_metadata(raw)
+        if merged is not None:
+            return merged
+    except Exception:
+        logger.exception("Reduce metadata extraction failed")
+
+    logger.warning("LLM merge failed — using heuristic metadata merge")
+    return _merge_partial_metadata(partials)
+
+
 def extract_metadata(
     client: httpx.Client,
     ocr_text: str,
     images: list[str] | None = None,
 ) -> dict:
-    """Extract structured metadata from OCR text and document images.
+    """Extract structured metadata from OCR text (text-only MiniCPM).
 
-    Uses the OpenRouter LLM with optional multimodal (vision) input.
-    Makes up to two attempts: an initial extraction and one correction
-    retry if the first response is not valid JSON.  Returns a fallback
-    dict when both attempts fail.
+    For long documents the text is split into page-aware chunks, metadata is
+    extracted per chunk, then merged (map-reduce). Makes one repair attempt
+    if the first response is not valid JSON before returning a clean fallback.
 
     Args:
-        client: Pre-configured :class:`httpx.Client` for OpenRouter.
-        ocr_text: Full text extracted via OCR / native PDF parsing.
-        images: Optional list of base64-encoded JPEG page images to
-            provide visual context to the LLM alongside the text.
+        client: Pre-configured :class:`httpx.Client` for the LLM provider.
+        ocr_text: Text extracted via OCR / native PDF parsing.
+        images: Ignored for the text-only llamacpp provider; forwarded to
+            vision-capable providers only.
 
     Returns:
-        Dictionary with keys: ``titre``, ``type``, ``emetteur``, ``date``,
-        ``montant``, ``reference``, ``destinataire``, ``resume``, ``tags``.
+        Dictionary with the document metadata fields.
     """
-    truncated_text = ocr_text[:_MAX_OCR_CHARS]
+    if not ocr_text or not ocr_text.strip():
+        return _fallback_metadata()
 
-    # --- First attempt ------------------------------------------------------
+    if len(ocr_text) > _cfg.LLM_MAP_CHUNK_CHARS:
+        return _extract_metadata_map_reduce(client, ocr_text)
+
+    truncated_text = ocr_text[:_MAX_OCR_CHARS]
+    user_message = f"{OCR_TEXT_ONLY_NOTE}\n\n{truncated_text}"
+
     logger.info("Extracting metadata (attempt 1)…")
     try:
         raw_response = _call_llm(
             client,
             system_prompt=METADATA_EXTRACTION_PROMPT,
-            user_message=truncated_text,
+            user_message=user_message,
             images=images,
         )
         metadata = _parse_and_validate_metadata(raw_response)
@@ -368,7 +564,7 @@ def extract_metadata(
         )
         return metadata
 
-    # --- Retry with correction prompt (text-only to save tokens) ------------
+    # One repair attempt, text-only.
     logger.warning("First attempt failed; retrying with correction prompt…")
     try:
         correction_user_msg = METADATA_CORRECTION_PROMPT.format(text=truncated_text)
@@ -386,21 +582,114 @@ def extract_metadata(
         logger.info("Metadata extracted on retry (type=%s)", metadata["type"])
         return metadata
 
-    # --- Fallback -----------------------------------------------------------
     logger.error("Both metadata extraction attempts failed — returning default metadata")
-    return {
-        "titre": "Document non classifié",
-        "type": "autre",
-        "emetteur": "",
-        "date": "",
-        "montant": None,
-        "reference": None,
-        "destinataire": None,
-        "resume": "Classification automatique échouée",
-        "tags": [],
-        "date_expiration": None,
-        "date_echeance": None,
-    }
+    return _fallback_metadata()
+
+
+# ---------------------------------------------------------------------------
+# Multi-document segmentation
+# ---------------------------------------------------------------------------
+
+def _sanitize_segments(raw_segments, pages_total: int) -> list[dict]:
+    """Validate and normalise the segment list returned by the LLM."""
+    if not isinstance(raw_segments, list) or not raw_segments:
+        return []
+
+    cleaned: list[dict] = []
+    for item in raw_segments:
+        if not isinstance(item, dict):
+            continue
+        pages = item.get("pages")
+        if not isinstance(pages, (list, tuple)) or len(pages) != 2:
+            continue
+        try:
+            start, end = int(pages[0]), int(pages[1])
+        except (TypeError, ValueError):
+            continue
+        start = max(1, min(start, pages_total))
+        end = max(1, min(end, pages_total))
+        if start > end:
+            start, end = end, start
+        doc_type = item.get("type") if item.get("type") in VALID_DOC_TYPES else "autre"
+        title = item.get("titre") or item.get("title") or None
+        cleaned.append({
+            "pages": [start, end],
+            "type": doc_type,
+            "titre": str(title).strip() if title else None,
+        })
+
+    cleaned.sort(key=lambda x: x["pages"][0])
+
+    # Remove overlaps and cover every page exactly once.
+    result: list[dict] = []
+    expected = 1
+    for segment in cleaned:
+        start, end = segment["pages"]
+        start = max(start, expected)
+        if start > end:
+            continue
+        segment["pages"] = [start, end]
+        result.append(segment)
+        expected = end + 1
+
+    if not result:
+        return []
+    # Extend the first/last segments so all pages are included.
+    if result[0]["pages"][0] > 1:
+        result[0]["pages"][0] = 1
+    if result[-1]["pages"][1] < pages_total:
+        result[-1]["pages"][1] = pages_total
+
+    # Safety valve: never produce an absurd number of segments.
+    if len(result) > max(1, pages_total):
+        return []
+    return result
+
+
+def segment_documents(client: httpx.Client, pages: list[str]) -> list[dict]:
+    """Ask MiniCPM whether a scanned file contains multiple documents.
+
+    Returns a list of ``{"pages": [start, end], "type": str, "titre": str}``
+    segments covering all pages. Falls back to a single document whenever
+    the answer is missing, invalid or uncertain.
+    """
+    pages_total = len(pages)
+    single = [{"pages": [1, pages_total], "type": None, "titre": None}]
+    if pages_total <= 1 or not _cfg.SEGMENT_MULTI_DOC:
+        return single
+    if pages_total > 60:
+        logger.info("Segmentation skipped for %d-page file (likely one document)", pages_total)
+        return single
+
+    # Very short OCR pages are unlikely to carry enough signal to split safely.
+    non_empty = sum(1 for p in pages if len((p or "").strip()) >= 30)
+    if non_empty < 2:
+        return single
+
+    try:
+        raw = _call_llm(
+            client,
+            system_prompt=SEGMENTATION_PROMPT,
+            user_message=segmentation_user_message(pages),
+            max_tokens=2048,
+        )
+        parsed = _extract_json(raw, "[")
+        segments = _sanitize_segments(parsed, pages_total)
+    except Exception:
+        logger.exception("Segmentation LLM call failed — keeping a single document")
+        return single
+
+    if len(segments) <= 1:
+        logger.info("Segmentation: single document across %d page(s)", pages_total)
+        return single
+
+    logger.info(
+        "Segmentation: %d documents detected across %d pages — %s",
+        len(segments),
+        pages_total,
+        ", ".join(f"{s['pages'][0]}-{s['pages'][1]}" for s in segments),
+    )
+    return segments
 
 
 def _build_rag_context(context_documents: list[dict]) -> str:
