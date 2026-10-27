@@ -70,12 +70,52 @@ Sur les 10 fichiers du sous-ensemble, un scan de 5 pages a été détecté comme
 Couverture complète, sans chevauchement. Les 9 autres fichiers sont restés
 mono-document.
 
-## Corpus complet
+## Corpus complet — 88 fichiers
 
-Le lancement sur les 88 fichiers (158 pages : 110 natives, 48 scannées) est en
-cours avec reprise (`documind bench /srv/docs-test --resume`). Les résultats
-agrégés seront ajoutés ici à la fin : médiane/p90 s/page scannée, taux d'échec,
-nombre de documents et de scans segmentés, RAM crête.
+Exécution terminée avec `--resume`, sans erreur.
+
+| Indicateur | Valeur |
+|---|---:|
+| Fichiers traités | 88 |
+| Pages | 158 (49 scannées, 109 natives) |
+| Contenus uniques (SHA-256) | 60 |
+| Doublons de contenu | 28 fichiers |
+| Documents produits | 90 |
+| Échecs | **0** |
+| Durée murale cumulée | 2 101,8 s (~35 min) |
+| Durée murale médiane / p90 | 6,0 s / 50,1 s |
+| Fichier le plus long | 450,8 s (scan de 7 pages, 22 Mo) |
+| MiniCPM total | 477,8 s |
+| MiniCPM médian / p90 par fichier | 3,66 s / 8,44 s |
+| MiniCPM moyen par fiche | 5,31 s |
+| RAM crête du processus | **925,2 Mo** |
+
+### OCR à froid (contenus uniques)
+
+Le corpus contient 28 doublons exacts (mêmes SHA-256). Le cache page évite de
+ré-OCRiser ces doublons : 6 doublons scannés (14 pages) ont été servis par le
+cache, économisant ~508 s. Pour ne pas sous-estimer l'OCR, les statistiques
+ci-dessous ne gardent que la première mesure à froid de chaque contenu.
+
+| Indicateur | Valeur |
+|---|---:|
+| Fichiers scannés uniques | 20 |
+| Pages scannées uniques | 35 |
+| Temps OCR froid total | 1 451,8 s |
+| Moyenne | **41,48 s/page** |
+| Médiane | **36,30 s/page** |
+| p90 | **61,23 s/page** |
+
+Les 80 pages natives uniques ne passent pas par l'OCR (~0,01 s/page). La moyenne
+globale de 9,21 s/page sur les 158 pages n'est donc pas représentative : il faut
+raisonner par catégorie.
+
+### Segmentation et formats
+
+- 1 scan sur 88 a été segmenté : 5 pages → 3 documents contigus (1–2, 3–4, 5–5).
+- 7 fichiers non supportés (2 `.docx`, 2 `.txt`, 2 `.rar`, 1 `.zip`) ont été
+  listés et ignorés sans erreur.
+- Aucun document n'est resté en `error` à la fin du run.
 
 ## Reproduire
 
