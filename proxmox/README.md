@@ -21,12 +21,15 @@ The community script:
 - Builds the Next.js frontend
 - Creates and enables a `documind.service` systemd unit
 - Provides a built-in **update** flow (run the same script again on an existing container)
+- Installs the `documind` CLI in `/usr/local/bin`
 
-After install, set your OpenRouter API key:
+After install, point the container at your local backends (defaults already
+target `192.168.1.59`) and restart if needed:
 
 ```bash
 pct exec <CTID> -- nano /opt/documind/.env
 pct exec <CTID> -- systemctl restart documind
+pct exec <CTID> -- documind status
 ```
 
 ---
@@ -61,8 +64,13 @@ chmod +x install-documind.sh
 |----------|---------|-------------|
 | `CTID` | `104` | Container ID |
 | `CT_HOSTNAME` | `documind` | Hostname |
-| `OPENROUTER_API_KEY` | *(prompt)* | API key for AI features |
-| `OPENROUTER_MODEL` | `google/gemini-3.1-pro-preview` | LLM model |
+| `MEMORY` | `4096` | RAM in MB |
+| `CORES` | `4` | vCPU count |
+| `OVISOCR_URL` | `http://192.168.1.59:8081/v1` | OvisOCR3 endpoint |
+| `OVISOCR_MODEL` | `ovisocr3` | OCR model alias |
+| `LLAMACPP_BASE_URL` | `http://192.168.1.59:8080` | MiniCPM endpoint |
+| `LLAMACPP_MODEL` | `minicpm5-2b` | LLM model alias |
+| `OCR_DPI` | `130` | PDF render DPI |
 
 ---
 

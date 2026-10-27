@@ -141,12 +141,21 @@ fi
 # ---------------------------------------------------------------------------
 msg_info "Writing environment configuration"
 cat >"${APP_DIR}/.env" <<'ENVEOF'
-# DocuMind Environment Configuration
-# Set your OpenRouter API key below after installation:
+# DocuMind Environment Configuration — fully local pipeline.
+# Edit the backend addresses if OvisOCR3 / MiniCPM are not on 192.168.1.59:
 #   nano /opt/documind/.env  &&  systemctl restart documind
 DOCUMIND_DATA_DIR=/opt/documind-data
-OPENROUTER_API_KEY=
-OPENROUTER_MODEL=google/gemini-3.1-pro-preview
+AI_PROVIDER=llamacpp
+LLAMACPP_BASE_URL=http://192.168.1.59:8080
+LLAMACPP_MODEL=minicpm5-2b
+LLM_DISABLE_THINKING=1
+OCR_BACKEND=ovis
+OVISOCR_URL=http://192.168.1.59:8081/v1
+OVISOCR_MODEL=ovisocr3
+OCR_DPI=130
+OCR_PROMPT=plain
+OCR_CACHE_ENABLED=1
+SEGMENT_MULTI_DOC=1
 PYTHONUNBUFFERED=1
 ENVEOF
 msg_ok "Wrote environment configuration"
@@ -178,6 +187,10 @@ SVCEOF
 systemctl daemon-reload
 $STD systemctl enable documind.service
 msg_ok "Created systemd service"
+
+ln -sf "${APP_DIR}/bin/documind" /usr/local/bin/documind
+chmod +x "${APP_DIR}/bin/documind"
+msg_ok "Installed CLI: documind"
 
 # ---------------------------------------------------------------------------
 # 10. Record installed version

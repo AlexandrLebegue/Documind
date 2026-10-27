@@ -1,278 +1,281 @@
 # 🗂️ DocuMind
 
-> **Self-hosted document management with OCR + AI — zero account, zero data leakage.**
+> **Self-hosted document archive with local OCR, local LLM and hybrid search — no paid API, no document ever leaves your network.**
 
-DocuMind centralizes, digitizes, organizes, and searches your personal documents (invoices, payslips, contracts, certificates, administrative mail) using OCR and AI. Everything runs in a single process or Docker container; AI is powered by the [OpenRouter](https://openrouter.ai/) API.
+DocuMind ingests PDFs and images, extracts their text, classifies them, splits
+multi-document scans into separate records, and makes everything searchable and
+queryable. OCR runs with **OvisOCR3** on CPU; metadata, segmentation and chat use
+**MiniCPM5-2B** on a local GPU; embeddings are computed locally with
+`sentence-transformers`.
 
 ## ✨ Features
 
-- **Smart OCR** — automatic text extraction from scanned PDFs and images (Tesseract 5, FR/EN/DE/AR)
-- **AI Classification** — automatic metadata extraction (type, issuer, date, amount, reference) via LLM
-- **Hybrid Search** — full-text (FTS5) + semantic (sentence embeddings) search
-- **Chat with your documents** — ask questions in natural language, AI answers with citations
-- **Smart Alerts** — expiry warnings, renewal suggestions, gap detection
-- **Procedures** — step-by-step administrative guides with document matching
-- **Private** — your files never leave your machine; only extracted text is sent to OpenRouter
+- **Local OCR** — OvisOCR3 over an OpenAI-compatible HTTP API, page by page, with
+  per-page cache, progress tracking and Tesseract fallback.
+- **Smart ingestion** — native PDF text is kept when available; scanned pages are
+  rendered at 130 DPI (measured speed/quality sweet spot).
+- **Automatic metadata** — title, type, issuer, date, amount, reference, expiry,
+  tags, summary — extracted by MiniCPM5-2B, text only.
+- **Multi-document scans** — one PDF containing several documents is split into
+  child records with page ranges; the source scan becomes a `segmented` container.
+- **Hybrid search** — SQLite FTS5 + semantic embeddings, weighted fusion.
+- **Chat with your documents** — RAG answers with source document IDs.
+- **Long documents** — map-reduce summarisation when OCR text exceeds the context
+  budget (200k chars by default).
+- **CLI + REST API** — scriptable JSON client (`bin/documind`) and OpenAPI docs.
+- **Alerts, procedures, dashboard** — expiry warnings, renewal suggestions, gap
+  detection and step-by-step administrative guides.
+- **Private by design** — documents, OCR text, embeddings and the database stay on
+  your server; only the configured LAN backends see page images/text.
 
----
+## 🏗️ Architecture
 
-## 🚀 Quick Start — Docker Compose
+```
+                     ┌──────────────────────────────┐
+  Browser / CLI ───▶ │  FastAPI + static frontend   │ :8000
+                     │  SQLite + FTS5 + embeddings  │
+                     └───────┬──────────────┬───────┘
+                             │              │
+              page JPEG      │              │  OCR text (never images)
+                             ▼              ▼
+                  ┌──────────────────┐  ┌──────────────────────┐
+                  │ OvisOCR3 (CPU)   │  │ MiniCPM5-2B (GPU)    │
+                  │ :8081 /v1        │  │ :8080 /v1            │
+                  └──────────────────┘  └──────────────────────┘
+```
 
-The fastest way to run DocuMind on any machine with Docker.
+| Layer | Technology |
+|-------|-----------|
+| Backend | Python 3.11+, FastAPI, uvicorn |
+| OCR | OvisOCR3 via llama.cpp (default), Tesseract 5 fallback (fra/eng/deu/ara) |
+| LLM | MiniCPM5-2B via llama.cpp, thinking disabled |
+| Embeddings | `all-MiniLM-L6-v2` via sentence-transformers (lazy load) |
+| Search | SQLite FTS5 + cosine similarity |
+| Frontend | React / Next.js static export |
+| Database | SQLite 3 (WAL, thread-local connections) |
+| CLI | Python standard library only |
 
-### Prerequisites
+OvisOCR3 and MiniCPM are **external services** on the LAN. Their URLs are
+configurable and nothing is hard-coded to a cloud provider.
 
-- [Docker](https://docs.docker.com/get-docker/) + [Docker Compose](https://docs.docker.com/compose/install/)
-- 2 GB free RAM
-- An [OpenRouter](https://openrouter.ai/) API key
+## 🚀 Quick Start — native LXC (recommended)
 
-### 1. Clone the repository
+Tested target: Debian 12/13 LXC, 4 vCPU, 4 GB RAM, Python 3.13.
+
+1. Clone and run the installer inside the container:
 
 ```bash
 git clone https://github.com/AlexandrLebegue/Documind.git
 cd Documind
+sudo bash install/documind-install.sh
 ```
 
-### 2. Set your API key
+2. Edit the generated environment file if your OCR/LLM servers are not at the
+   default addresses:
 
 ```bash
-cp .env.example .env
-nano .env          # set OPENROUTER_API_KEY=sk-or-v1-...
+sudo nano /opt/documind/.env
+sudo systemctl restart documind
 ```
 
-### 3. Start
+3. Open `http://<container-ip>:8000` (API docs at `/docs`).
 
-```bash
-docker compose up -d
-```
+The installer creates `/opt/documind` (code + venv), `/opt/documind-data`
+(originals, DB, caches), a `documind` systemd service, and a `documind` CLI
+symlink in `/usr/local/bin`.
 
-### 4. Open your browser
-
-**[http://localhost:8000](http://localhost:8000)** — that's it!
-
-> **Data storage**: by default the `docker-compose.yml` mounts a named Docker volume.
-> To use a NAS/CIFS share instead, configure the `driver_opts` block in `docker-compose.yml`.
-
----
-
-## 🖥️ Deploy on Proxmox VE (LXC container)
-
-Run the one-liner below on your **Proxmox host shell** — it creates a Debian 12 LXC container
-and lets you choose between two install methods:
+### One-liner on a Proxmox VE host
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/AlexandrLebegue/Documind/main/ct/Documind.sh)
 ```
 
-You will be prompted to choose:
-
-| # | Method | Description |
-|---|--------|-------------|
-| **1** | **Docker** | DocuMind runs in Docker Compose inside the LXC. Easy updates with `docker compose pull`. Requires ~500 MB extra for Docker. |
-| **2** | **Native** | Python venv + Node.js installed directly. No Docker overhead, direct `systemd` service management. |
-
-After the installation finishes you will see the LXC IP and the command to set your API key.
-
-### Override default settings
+The Proxmox installers create the LXC, install dependencies, build the frontend
+and configure the service. They no longer ask for an API key. For the standalone
+container installer:
 
 ```bash
-CTID=110 CT_RAM=4096 CT_DISK=20 CT_HOSTNAME=docs \
-  bash <(curl -fsSL https://raw.githubusercontent.com/AlexandrLebegue/Documind/main/ct/Documind.sh)
+CTID=105 CT_HOSTNAME=documind \
+  bash proxmox/install-documind.sh
 ```
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CTID` | next available | Proxmox container ID |
-| `CT_HOSTNAME` | `documind` | LXC hostname |
-| `CT_RAM` | `2048` | RAM in MiB |
-| `CT_CORES` | `2` | vCPU count |
-| `CT_DISK` | `10` | Root disk in GiB |
-| `CT_BRIDGE` | `vmbr0` | Network bridge |
-| `TEMPLATE_STORAGE` | `local` | Storage for the Debian template |
-| `CONTAINER_STORAGE` | `local-lvm` | Storage for the container rootfs |
-
-### Post-install — set your API key
-
-**Docker method:**
-```bash
-pct exec <CTID> -- nano /opt/documind/.env
-pct exec <CTID> -- docker compose -f /opt/documind/docker-compose.yml up -d
-```
-
-**Native method:**
-```bash
-pct exec <CTID> -- nano /opt/documind/.env
-pct exec <CTID> -- systemctl restart documind
-```
-
----
 
 ## 🔧 Configuration
 
-All environment variables (set in `.env` or `docker-compose.yml`):
+Settings are read from `.env` (next to `config.py`) or from the process
+environment. `settings.json` in the data directory can override a few values
+saved from the web UI.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DOCUMIND_DATA_DIR` | `/data` | Base data directory (originals, DB, model cache) |
-| `OPENROUTER_API_KEY` | _(empty)_ | Your OpenRouter API key |
-| `OPENROUTER_MODEL` | `google/gemini-3.1-pro-preview` | LLM model via OpenRouter |
-| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter API URL |
-| `PYTHONUNBUFFERED` | `1` | Flush Python logs immediately |
+| `DOCUMIND_DATA_DIR` | `/data` | Base directory for originals, DB, models, OCR cache, bench |
+| `AI_PROVIDER` | `llamacpp` | `llamacpp` (local MiniCPM) or legacy providers |
+| `LLAMACPP_BASE_URL` | `http://192.168.1.59:8080` | MiniCPM OpenAI-compatible endpoint |
+| `LLAMACPP_MODEL` | `minicpm5-2b` | Model alias sent to llama.cpp |
+| `LLM_DISABLE_THINKING` | `1` | Disable MiniCPM thinking for deterministic JSON |
+| `OVISOCR_URL` | `http://192.168.1.59:8081/v1` | OvisOCR3 OpenAI-compatible endpoint |
+| `OVISOCR_MODEL` | `ovisocr3` | OCR model alias |
+| `OCR_BACKEND` | `ovis` | `ovis` (default) or `tesseract` |
+| `OCR_DPI` | `130` | PDF render DPI (130 = measured sweet spot) |
+| `OCR_PROMPT` | `plain` | `plain` text or `markdown` tables |
+| `OCR_PAGE_TIMEOUT` | `400` | Per-page OCR timeout in seconds |
+| `OCR_PAGE_RETRIES` | `2` | Retries before Tesseract fallback |
+| `OCR_CACHE_ENABLED` | `1` | SHA-256 page cache in `DATA_DIR/ocr_cache` |
+| `SEGMENT_MULTI_DOC` | `1` | Split scans containing several documents |
+| `LLM_MAP_CHUNK_CHARS` | `200000` | Map-reduce threshold (~50k tokens) |
+| `LLM_MAP_CHUNK_PAGES` | `8` | Page block size for map-reduce |
+| `EMBEDDING_MODEL_NAME` | `all-MiniLM-L6-v2` | Local embedding model |
+| `EMBEDDING_LAZY_LOAD` | `1` | Load embeddings on first use |
+| `SQLITE_CACHE_MB` / `SQLITE_MMAP_MB` | `20` / `128` | SQLite tuning |
+| `NAS_*` | — | Optional SMB sync credentials |
 
----
+Legacy `AI_PROVIDER=openrouter|ollama|custom` values are still accepted by
+`llm.py`, but the default and documented setup is fully local.
 
 ## 📁 Data Storage
 
 ```
-/data/  (or ~/documind/ for bind-mount)
-├── originals/        # Uploaded original files
-├── models/           # Embedding model cache (~90 MB on first run)
-└── documind.db       # SQLite database (FTS5 + all metadata)
+/opt/documind-data/
+├── originals/        # Uploaded files (segments share the source file)
+├── models/           # Embedding model cache
+├── ocr_cache/        # Per-page OCR cache (SHA-256 keyed)
+├── bench/            # Benchmark CSV/logs (never committed)
+├── documind.db       # SQLite database (FTS5 + metadata + embeddings)
+└── settings.json     # Optional UI overrides
 ```
 
-Your files never leave your server. Back up the whole `/data/` directory regularly.
-
----
-
-## 🏗️ Architecture
-
-```
-Single process — Port 8000
-┌───────────────────────────────────────┐
-│  FastAPI (Python 3.12)                │
-│  ├── Static frontend (Next.js)        │
-│  ├── REST API  /api/*                 │
-│  ├── OpenRouter  (LLM / AI)           │
-│  ├── pytesseract  (OCR)               │
-│  ├── sentence-transformers (vectors)  │
-│  └── SQLite + FTS5  (database)        │
-└───────────────────────────────────────┘
-```
-
-| Layer | Technology |
-|-------|-----------|
-| Backend | Python 3.12, FastAPI, uvicorn |
-| LLM | OpenRouter API (default: `google/gemini-3.1-pro-preview`) |
-| OCR | Tesseract 5 (fra + eng + deu + ara) |
-| Embeddings | `all-MiniLM-L6-v2` via sentence-transformers |
-| Search | SQLite FTS5 + cosine similarity |
-| Frontend | React / Next.js (static export) |
-| Database | SQLite 3 |
-
----
+Back up the whole data directory. Documents and OCR text must stay on the
+server; do not copy `bench/` CSVs or database dumps into git or tickets.
 
 ## ⌨️ CLI
 
-`bin/documind` pilote l'API HTTP sans dépendance lourde (sortie JSON par
-défaut, `--human` pour un rendu lisible) :
+`bin/documind` (installed as `/usr/local/bin/documind`) talks to the HTTP API with
+the Python standard library. JSON is the default output; add `--human` for
+tables. Global flags go before the subcommand.
 
 ```bash
-./bin/documind upload scan.pdf --wait
-./bin/documind list --type facture --since 2024-01-01
-./bin/documind show <id> --pages
-./bin/documind search "facture électricité"
-./bin/documind ask "Quelle est la date d'expiration de ma carte d'identité ?"
-./bin/documind bench /srv/docs-test --out /opt/documind-data/bench/run.csv
+documind status
+documind upload scan.pdf --wait
+documind upload /srv/docs-test/
+documind list --type facture --since 2024-01-01 --q EDF
+documind show <id> --pages
+documind search "facture électricité 2024"
+documind ask "Quelle est la date d'expiration de ma carte d'identité ?"
+documind reprocess <id> --wait
+documind delete <id> --yes
+documind stats
+documind bench /srv/docs-test --out /opt/documind-data/bench/run.csv --resume
 ```
 
-Guide complet pour les agents et utilisateurs : [`skills/documind/SKILL.md`](skills/documind/SKILL.md).
+For agents and advanced usage (API details, errors, multi-document handling), see
+[`skills/documind/SKILL.md`](skills/documind/SKILL.md).
+
+## 📊 Benchmarking
+
+`documind bench` ingests every supported file (or a list via `--files-from`),
+waits for completion, and writes one CSV row per file with pages, OCR seconds
+and seconds/page, MiniCPM seconds, number of documents produced, types/titles,
+wall time, process RSS/peak RSS and errors. `--resume` skips completed rows and
+retries interrupted ones without re-uploading.
+
+```bash
+documind bench /srv/docs-test --out /opt/documind-data/bench/all.csv --resume
+```
+
+Aggregated, content-free results live in [`docs/BENCH.md`](docs/BENCH.md).
+Performance work on startup/database is documented in
+[`docs/PERF.md`](docs/PERF.md); session progress is tracked in
+[`docs/STATUS.md`](docs/STATUS.md).
 
 ## 📡 API Reference
 
-Interactive docs at **[http://localhost:8000/docs](http://localhost:8000/docs)**.
+Interactive docs: `http://<host>:8000/docs`.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET`  | `/api/health` | Health check |
-| `POST` | `/api/documents/upload` | Upload a document |
-| `GET`  | `/api/documents` | List documents |
-| `GET`  | `/api/documents/{id}` | Get document details |
-| `PUT`  | `/api/documents/{id}` | Update metadata |
-| `DELETE` | `/api/documents/{id}` | Delete a document |
-| `POST` | `/api/documents/{id}/reprocess` | Re-analyze a document |
-| `POST` | `/api/search` | Hybrid search |
-| `POST` | `/api/chat` | Chat with documents |
-| `GET`  | `/api/chat/sessions` | List chat sessions |
-| `POST` | `/api/agent/chat` | Agentic chat (web search enabled) |
-| `GET`  | `/api/procedures` | List procedures |
-| `GET`  | `/api/alerts` | Smart alerts |
-| `GET`  | `/api/stats` | Dashboard statistics |
+| `GET` | `/api/health` | Service health and document count |
+| `GET` | `/api/system` | Process RSS/peak, uptime, status counts |
+| `GET` | `/api/queue` | Active/pending processing queue |
+| `POST` | `/api/documents/upload` | Upload a PDF/image (multipart `file`) |
+| `GET` | `/api/documents` | List/filter (`doc_type`, `date_from`, `q`, `filename`, pagination) |
+| `GET` | `/api/documents/{id}` | Full document with OCR text |
+| `GET` | `/api/documents/{id}/segments` | Child documents of a segmented scan |
+| `GET` | `/api/documents/{id}/file` | Original file |
+| `PUT` | `/api/documents/{id}` | Edit metadata |
+| `POST` | `/api/documents/{id}/reprocess` | Re-run OCR → segmentation → metadata |
+| `DELETE` | `/api/documents/{id}` | Delete a document (and its segments) |
+| `POST` | `/api/search` | Hybrid FTS + semantic search |
+| `POST` | `/api/chat` | RAG chat with source IDs |
+| `GET` | `/api/chat/sessions` | Chat sessions |
+| `GET` | `/api/stats` | Dashboard statistics |
+| `GET` | `/api/alerts` | Expiry/renewal/gap alerts |
+| `GET` | `/api/procedures` | Administrative procedures |
 
 ### Examples
 
 ```bash
-# Upload
 curl -X POST http://localhost:8000/api/documents/upload -F "file=@invoice.pdf"
 
-# Search
 curl -X POST http://localhost:8000/api/search \
   -H "Content-Type: application/json" \
   -d '{"query": "facture electricite 2024"}'
 
-# Chat
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
-  -d '{"message": "Quel est le montant de ma dernière facture EDF ?"}'
+  -d '{"message": "Quel est le montant de ma dernière facture ?"}'
 ```
-
----
 
 ## 🛠️ Development
 
-### Backend
-
 ```bash
 python3 -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+source venv/bin/activate
 pip install -r requirements.txt
-# Optional web-agent tools:
-pip install -r requirements-optional.txt
-python main.py                    # builds frontend + starts server on :8000
+cp .env.example .env
+python main.py --skip-build
 ```
 
-### Frontend only
+Frontend:
 
 ```bash
 cd frontend
-npm install
-npm run dev     # dev server on :3000 with API proxy to :8000
-npm run build   # static export to frontend/out/
+npm ci
+npm run build          # static export in frontend/out
 ```
 
-### Docker Build
+Useful scripts:
 
 ```bash
-docker compose build
-docker compose up
+python scripts/perf_profile.py imports
+python scripts/perf_profile.py startup
+python scripts/perf_profile.py db
 ```
 
----
+There is no test suite in the repository; validate changes with
+`python -m py_compile` and a real ingestion on the LXC test corpus.
 
 ## 📋 Supported Formats
 
-| Format | Notes |
-|--------|-------|
-| PDF | Native text extraction + OCR fallback for scanned pages |
-| JPG / JPEG / PNG | Full OCR |
-| TIFF / WEBP | Full OCR |
-| Max size | 50 MB per file |
+`.pdf`, `.jpg`, `.jpeg`, `.png`, `.tiff`, `.webp` (max 50 MB per file).
 
----
+Unsupported formats found during a folder ingest (`.docx`, `.txt`, `.rar`,
+`.zip`) are listed and skipped without crashing.
 
 ## 🔒 Privacy & Security
 
-- **Minimal exposure**: only extracted text is sent to OpenRouter — original files stay on disk
-- **No telemetry**: no analytics, no tracking
-- **No accounts**: no login, no registration
-- **Open source**: audit the code yourself
-
----
+- Original files and extracted text remain in `DOCUMIND_DATA_DIR`.
+- OCR images are sent only to `OVISOCR_URL`; text is sent only to
+  `LLAMACPP_BASE_URL` (both on the LAN by default).
+- No API key is required for the default local pipeline.
+- Never commit personal documents, OCR text, database files or bench CSVs.
+- The service listens on port 8000; restrict access with your firewall or a
+  reverse proxy if the LAN is not trusted.
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please open an issue or PR on [GitHub](https://github.com/AlexandrLebegue/Documind).
+Small, focused commits are preferred. Do not include personal document content
+or credentials in commits, issues or logs. Update `docs/STATUS.md` after each
+milestone and benchmark changes with `documind bench`.
 
 ## 📄 License
 
-Apache License 2.0 — see [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE).

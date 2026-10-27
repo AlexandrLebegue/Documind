@@ -26,17 +26,20 @@ TEMPLATE="debian-12-standard_12.12-1_amd64.tar.zst"
 TEMPLATE_STORAGE="local"
 CONTAINER_STORAGE="local-lvm"
 DISK_SIZE="8"          # GB
-MEMORY="2048"          # MB
-CORES="2"
+MEMORY="4096"          # MB
+CORES="4"
 BRIDGE="vmbr0"
 IP_CONFIG="dhcp"       # or e.g. "192.168.1.50/24,gw=192.168.1.1"
 DOCUMIND_PORT="8000"
 APP_DIR="/opt/documind"
 DATA_DIR="/opt/documind-data"
 
-# OpenRouter API settings
-OPENROUTER_API_KEY="${OPENROUTER_API_KEY:-}"
-OPENROUTER_MODEL="${OPENROUTER_MODEL:-google/gemini-3.1-pro-preview}"
+# Local AI backends (OpenAI-compatible llama.cpp servers)
+OVISOCR_URL="${OVISOCR_URL:-http://192.168.1.59:8081/v1}"
+OVISOCR_MODEL="${OVISOCR_MODEL:-ovisocr3}"
+LLAMACPP_BASE_URL="${LLAMACPP_BASE_URL:-http://192.168.1.59:8080}"
+LLAMACPP_MODEL="${LLAMACPP_MODEL:-minicpm5-2b}"
+OCR_DPI="${OCR_DPI:-130}"
 
 # --------------------------------------------------
 # Colors
@@ -99,21 +102,16 @@ preflight() {
 }
 
 # --------------------------------------------------
-# Ask for OpenRouter API key if not set
+# Ask for local AI backend addresses
 # --------------------------------------------------
-ask_api_key() {
-    if [[ -z "$OPENROUTER_API_KEY" ]]; then
-        echo ""
-        msg_warn "OPENROUTER_API_KEY is not set."
-        echo -e "  DocuMind needs an OpenRouter API key for AI features."
-        echo -e "  Get one at: ${BD}https://openrouter.ai/keys${NC}"
-        echo ""
-        read -rp "  Enter your OpenRouter API key (or press Enter to skip): " OPENROUTER_API_KEY
-        echo ""
-        if [[ -z "$OPENROUTER_API_KEY" ]]; then
-            msg_warn "No API key provided. You can set it later in ${APP_DIR}/.env"
-        fi
-    fi
+ask_backends() {
+    echo ""
+    msg_info "Local AI backends (press Enter to keep the default)"
+    read -rp "  OvisOCR3 URL [${OVISOCR_URL}]: " _url
+    OVISOCR_URL="${_url:-$OVISOCR_URL}"
+    read -rp "  MiniCPM URL  [${LLAMACPP_BASE_URL}]: " _url
+    LLAMACPP_BASE_URL="${_url:-$LLAMACPP_BASE_URL}"
+    echo ""
 }
 
 # --------------------------------------------------
@@ -331,10 +329,19 @@ build_frontend() {
 create_env_file() {
     msg_info "Creating environment configuration..."
     cat > /tmp/documind.env <<ENVEOF
-# DocuMind Environment Configuration
+# DocuMind Environment Configuration — fully local pipeline
 DOCUMIND_DATA_DIR=${DATA_DIR}
-OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-OPENROUTER_MODEL=${OPENROUTER_MODEL}
+AI_PROVIDER=llamacpp
+LLAMACPP_BASE_URL=${LLAMACPP_BASE_URL}
+LLAMACPP_MODEL=${LLAMACPP_MODEL}
+LLM_DISABLE_THINKING=1
+OCR_BACKEND=ovis
+OVISOCR_URL=${OVISOCR_URL}
+OVISOCR_MODEL=${OVISOCR_MODEL}
+OCR_DPI=${OCR_DPI}
+OCR_PROMPT=plain
+OCR_CACHE_ENABLED=1
+SEGMENT_MULTI_DOC=1
 PYTHONUNBUFFERED=1
 ENVEOF
     pct push "$CTID" /tmp/documind.env "${APP_DIR}/.env"
@@ -382,6 +389,7 @@ start_service() {
     sleep 3
 
     # Check if running
+    pct exec "$CTID" -- bash -c "ln -sf ${APP_DIR}/bin/documind /usr/local/bin/documind && chmod +x ${APP_DIR}/bin/documind"
     if pct exec "$CTID" -- bash -c "systemctl is-active documind.service" | grep -q "active"; then
         msg_ok "DocuMind service is running!"
     else
@@ -414,13 +422,14 @@ print_summary() {
     echo "    pct exec ${CTID} -- systemctl status documind"
     echo "    pct exec ${CTID} -- journalctl -u documind -f"
     echo "    pct exec ${CTID} -- systemctl restart documind"
+    echo "    pct exec ${CTID} -- documind status"
     echo ""
-    if [[ -z "$OPENROUTER_API_KEY" ]]; then
-        echo -e "  ${YW}⚠ Remember to set your OpenRouter API key:${NC}"
-        echo "    pct exec ${CTID} -- nano ${APP_DIR}/.env"
-        echo "    pct exec ${CTID} -- systemctl restart documind"
-        echo ""
-    fi
+    echo -e "  ${BD}Backends:${NC}"
+    echo "    OCR  ${OVISOCR_URL} (${OVISOCR_MODEL})"
+    echo "    LLM  ${LLAMACPP_BASE_URL} (${LLAMACPP_MODEL})"
+    echo ""
+    echo -e "  ${YW}If a backend address changes, edit ${APP_DIR}/.env and restart.${NC}"
+    echo ""
 }
 
 # --------------------------------------------------
@@ -443,7 +452,7 @@ trap cleanup EXIT
 main() {
     header
     preflight
-    ask_api_key
+    ask_backends
     download_template
     create_container
     start_container

@@ -2,7 +2,7 @@
 # ============================================================
 # DocuMind — Multi-stage Dockerfile
 # Stage 1: Build the React/Next.js frontend
-# Stage 2: Python application with Tesseract OCR & OpenRouter LLM
+# Stage 2: Python application with Tesseract fallback & local OCR/LLM clients
 # ============================================================
 
 # --------------------------------------------------
