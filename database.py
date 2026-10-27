@@ -1051,7 +1051,7 @@ def get_stats() -> dict[str, Any]:
 
         # Expiring soon: documents with date_expiration between today and +30 days
         expiring_soon = conn.execute(
-            """
+            f"""
             SELECT COUNT(*) AS cnt FROM documents
             WHERE date_expiration IS NOT NULL
               AND date_expiration >= ?
