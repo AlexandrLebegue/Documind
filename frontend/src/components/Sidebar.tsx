@@ -105,7 +105,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           {/* Close button - mobile only */}
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-[#6b7280] hover:text-[#1a1a1a] hover:bg-beige-300/60 transition-colors md:hidden"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-[#6b7280] hover:text-[#1a1a1a] hover:bg-beige-300/60 transition-colors md:hidden"
             aria-label="Fermer le menu"
           >
             <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

@@ -410,7 +410,7 @@ export default function SettingsPage() {
                     setLlamacppTesting(false);
                   }
                 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border border-zinc-200 transition-colors disabled:opacity-50"
+                className="flex min-h-[44px] items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 hover:bg-zinc-200 text-zinc-700 border border-zinc-200 transition-colors disabled:opacity-50"
               >
                 {llamacppTesting ? (
                   <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" /></svg>
@@ -694,7 +694,7 @@ export default function SettingsPage() {
             type="button"
             onClick={handleNasSyncNow}
             disabled={syncing}
-            className="flex items-center gap-2 px-4 py-2 bg-beige-100 hover:bg-beige-200 disabled:opacity-50 disabled:cursor-not-allowed text-[#1a1a1a] rounded-lg text-sm font-medium transition-colors border border-beige-300"
+            className="flex min-h-[44px] items-center gap-2 px-4 py-2 bg-beige-100 hover:bg-beige-200 disabled:opacity-50 disabled:cursor-not-allowed text-[#1a1a1a] rounded-lg text-sm font-medium transition-colors border border-beige-300"
           >
             {syncing ? (
               <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -773,7 +773,7 @@ export default function SettingsPage() {
           <button
             onClick={handleCheckUpdate}
             disabled={checkingUpdate || updating}
-            className="flex items-center gap-2 px-4 py-2 bg-beige-100 hover:bg-beige-200 disabled:opacity-50 disabled:cursor-not-allowed text-[#1a1a1a] rounded-lg text-sm font-medium transition-colors border border-beige-300"
+            className="flex min-h-[44px] items-center gap-2 px-4 py-2 bg-beige-100 hover:bg-beige-200 disabled:opacity-50 disabled:cursor-not-allowed text-[#1a1a1a] rounded-lg text-sm font-medium transition-colors border border-beige-300"
           >
             {checkingUpdate ? (
               <svg className="animate-spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -819,7 +819,7 @@ export default function SettingsPage() {
         <button
           onClick={handleSave}
           disabled={saving}
-          className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
+          className="flex min-h-[44px] w-full items-center justify-center gap-2 px-6 py-2.5 bg-accent hover:bg-accent-hover disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors sm:w-auto"
         >
           {saving ? (
             <>

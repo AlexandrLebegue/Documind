@@ -170,7 +170,7 @@ function DocumentDetailContent() {
                 </div>
                 <Link
                   href="/alerts"
-                  className={`min-h-[36px] flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium ${
+                  className={`min-h-[44px] flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium ${
                     isOverdue || daysRem <= 7
                       ? 'bg-red-100 text-red-700 hover:bg-red-200'
                       : 'bg-amber-100 text-amber-700 hover:bg-amber-200'
@@ -218,6 +218,22 @@ function DocumentDetailContent() {
           return null;
         })()}
   
+        {/* Mobile title, kept above the preview */}
+        <div className="mb-4 rounded-xl border border-beige-300/50 bg-white p-5 lg:hidden">
+          <div className="mb-2 flex items-start justify-between gap-2">
+            <h2 className="min-w-0 break-words pr-2 text-lg font-bold text-[#1a1a1a]">{doc.title || doc.filename}</h2>
+            <StatusBadge status={doc.status} />
+          </div>
+          {doc.title && (
+            <p className="mb-1 truncate text-xs text-[#6b7280]" title={doc.filename}>
+              📄 {doc.filename}
+            </p>
+          )}
+          <p className="text-xs text-[#6b7280]">
+            Ajouté le {new Date(doc.created_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          </p>
+        </div>
+
         {/* Two-panel layout */}
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         {/* Left panel: File preview */}
@@ -238,7 +254,7 @@ function DocumentDetailContent() {
               <object
                 data={`${fileUrl}#toolbar=1&view=FitH`}
                 type="application/pdf"
-                className="w-full flex-1 min-h-[600px]"
+                className="w-full flex-1 min-h-[380px] sm:min-h-[600px]"
               >
                 <div className="flex flex-col items-center justify-center p-8 flex-1 text-center">
                   <p className="text-sm text-[#6b7280] mb-4">
@@ -324,7 +340,7 @@ function DocumentDetailContent() {
               {hasMoreText && (
                 <button
                   onClick={() => setShowFullText(!showFullText)}
-                  className="mt-2 text-sm text-accent hover:text-accent-hover font-medium"
+                  className="mt-2 flex min-h-[44px] items-center text-sm text-accent hover:text-accent-hover font-medium"
                 >
                   {showFullText ? 'Voir moins' : 'Voir plus'}
                 </button>
@@ -336,7 +352,7 @@ function DocumentDetailContent() {
         {/* Right panel: Metadata */}
         <div className="lg:col-span-2 space-y-6">
           {/* Document title and status */}
-          <div className="bg-white rounded-xl border border-beige-300/50 p-5">
+          <div className="hidden bg-white rounded-xl border border-beige-300/50 p-5 lg:block">
             <div className="mb-2 flex items-start justify-between gap-2">
               <h2 className="min-w-0 break-words pr-2 text-lg font-bold text-[#1a1a1a]">{doc.title || doc.filename}</h2>
               <StatusBadge status={doc.status} />

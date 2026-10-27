@@ -392,7 +392,7 @@ export default function ChatPage() {
           <div className="flex items-center gap-1">
           <button
             onClick={handleNewConversation}
-            className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent hover:bg-accent-hover text-white transition-colors"
+            className="flex h-11 w-11 items-center justify-center rounded-lg bg-accent hover:bg-accent-hover text-white transition-colors"
             title="Nouvelle conversation"
             aria-label="Nouvelle conversation"
           >
@@ -411,7 +411,7 @@ export default function ChatPage() {
           </button>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-[#6b7280] hover:bg-beige-300/60 transition-colors md:hidden"
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-[#6b7280] hover:bg-beige-300/60 transition-colors md:hidden"
             aria-label="Fermer les conversations"
           >
             <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
@@ -724,7 +724,7 @@ export default function ChatPage() {
           <div className="flex items-center justify-end max-w-4xl mx-auto mb-2">
             <button
               onClick={() => setAgentMode((v) => !v)}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+              className={`flex min-h-[44px] items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors border ${
                 agentMode
                   ? 'bg-accent/10 text-accent border-accent/30'
                   : 'bg-transparent text-[#6b7280] border-beige-300 hover:border-accent/30 hover:text-accent/70'
@@ -763,8 +763,8 @@ export default function ChatPage() {
                 onKeyDown={handleKeyDown}
                 placeholder={
                   agentMode
-                    ? 'Posez une question — l\'agent peut chercher sur internet…'
-                    : 'Posez une question sur vos documents…'
+                    ? 'Question à l\'agent…'
+                    : 'Posez votre question…'
                 }
                 disabled={sending}
                 rows={1}

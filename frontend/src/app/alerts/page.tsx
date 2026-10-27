@@ -161,7 +161,7 @@ export default function AlertsPage() {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`flex-1 whitespace-nowrap py-2.5 px-3 text-sm font-medium rounded-md transition-colors ${
+            className={`flex min-h-[44px] flex-1 items-center justify-center whitespace-nowrap px-3 py-2.5 text-sm font-medium rounded-md transition-colors ${
               activeTab === tab.key
                 ? 'bg-white text-[#1a1a1a] shadow-sm'
                 : 'text-[#6b7280] hover:text-[#1a1a1a]'
@@ -194,7 +194,7 @@ export default function AlertsPage() {
                 <button
                   key={f.key}
                   onClick={() => setUrgencyFilter(f.key)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  className={`min-h-[44px] px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                     urgencyFilter === f.key
                       ? 'bg-white text-[#1a1a1a] shadow-sm'
                       : 'text-[#6b7280] hover:text-[#1a1a1a]'
@@ -213,7 +213,7 @@ export default function AlertsPage() {
                 <button
                   key={f.key}
                   onClick={() => setTypeFilter(f.key)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  className={`min-h-[44px] px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
                     typeFilter === f.key
                       ? 'bg-white text-[#1a1a1a] shadow-sm'
                       : 'text-[#6b7280] hover:text-[#1a1a1a]'

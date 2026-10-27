@@ -66,7 +66,7 @@ export default function LogsPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setPaused((p) => !p)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+            className={`min-h-[44px] px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
               paused
                 ? 'bg-yellow-600 hover:bg-yellow-500 text-white'
                 : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
@@ -76,7 +76,7 @@ export default function LogsPage() {
           </button>
           <button
             onClick={() => setLines([])}
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
+            className="min-h-[44px] px-4 py-2 rounded-lg text-xs font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors"
           >
             Effacer
           </button>
