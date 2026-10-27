@@ -86,4 +86,4 @@
 - Migration SQL idempotente au démarrage : rétro-remplissage depuis les originaux avec `file_hash`, sans modifier les marques/verdicts explicites existants ni créer de marques pour les segments enfants.
 - LXC 105 : sauvegarde SQLite locale avant migration ; 1 → 61 marques, second passage toujours 61, 0 original avec empreinte sans marque. Service redémarré, cas signalé vérifié via l'API réelle : 1 connu `accepted`, 0 inconnu, document lié.
 - 20 tests Python verts sur LXC 105, dont migration répétée, préservation des quatre verdicts, exclusion des segments/sans empreinte, archive ajoutée après démarrage, candidat déjà archivé non remis en file.
-- Aucun changement client/agent : release desktop `v0.1.0-desktop` conservée ; correctif uniquement serveur. Vérification GitHub CI du correctif en cours.
+- Aucun changement client/agent : release desktop `v0.1.0-desktop` conservée ; correctif uniquement serveur. Correctif serveur `70e3edf` poussé et déployé ; [suivi CI du correctif](https://github.com/AlexandrLebegue/Documind/actions/runs/40480878218).
