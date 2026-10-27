@@ -48,6 +48,11 @@ struct AgentStatusFile {
     last_error: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct AgentStateFile {
+    status: AgentStatusFile,
+}
+
 #[derive(Debug, Clone, Serialize)]
 struct AgentStatus {
     installed: bool,
@@ -239,7 +244,8 @@ fn read_agent_status() -> AgentStatusFile {
     }
     fs::read_to_string(path)
         .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .and_then(|raw| serde_json::from_str::<AgentStateFile>(&raw).ok())
+        .map(|state| state.status)
         .unwrap_or_default()
 }
 
@@ -322,4 +328,23 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running DocuMind desktop");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_agent_status_inside_persisted_state() {
+        let state: AgentStateFile = serde_json::from_str(
+            r#"{"cache":{},"status":{"running":true,"last_run":"2026-10-27T10:00:00Z","counters":{"sent":4,"accepted":2,"rejected":1,"ignored":7},"last_error":null}}"#,
+        )
+        .unwrap();
+        assert!(state.status.running);
+        assert_eq!(state.status.counters.sent, 4);
+        assert_eq!(state.status.counters.accepted, 2);
+        assert_eq!(state.status.counters.rejected, 1);
+        assert_eq!(state.status.counters.ignored, 7);
+        assert!(state.status.last_run.is_some());
+    }
 }

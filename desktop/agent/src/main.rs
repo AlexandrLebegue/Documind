@@ -884,3 +884,46 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn excludes_hidden_and_temporary_paths() {
+        assert!(is_hidden(Path::new("archive/.cache/invoice.pdf")));
+        assert!(is_hidden(Path::new(".invoice.pdf")));
+        assert!(!is_hidden(Path::new("archive/invoice.pdf")));
+        for name in ["~$invoice.pdf", "invoice.TMP", "invoice.part"] {
+            assert!(is_temporary(name));
+        }
+        assert!(!is_temporary("invoice.pdf"));
+    }
+
+    #[test]
+    fn validates_signatures_and_text_before_upload() {
+        let path = std::env::temp_dir().join(format!("documind-magic-{}", std::process::id()));
+        for (ext, bytes) in [
+            (".pdf", b"%PDF-1.7".as_slice()),
+            (".png", b"\x89PNG\r\n\x1a\n".as_slice()),
+            (".jpg", b"\xff\xd8\xff".as_slice()),
+            (".jpeg", b"\xff\xd8\xff".as_slice()),
+            (".bmp", b"BM".as_slice()),
+            (".txt", b"Facture caf\xe9".as_slice()),
+        ] {
+            fs::write(&path, bytes).unwrap();
+            assert!(check_magic(&path, ext).is_ok(), "{ext}");
+        }
+        for (ext, bytes) in [
+            (".pdf", b"PK archive".as_slice()),
+            (".png", b"not an image".as_slice()),
+            (".txt", b"binary\0data".as_slice()),
+            (".txt", b"  \n".as_slice()),
+            (".exe", b"MZ".as_slice()),
+        ] {
+            fs::write(&path, bytes).unwrap();
+            assert!(check_magic(&path, ext).is_err(), "{ext}");
+        }
+        fs::remove_file(path).unwrap();
+    }
+}

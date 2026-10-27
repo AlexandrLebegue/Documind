@@ -67,3 +67,11 @@
 - [x] M. Agent de synchronisation : filtres, cache SHA-256, service Windows/systemd, test bout en bout
 - [x] N. CI GitHub Actions (frontend, backend, agent) + workflow desktop Windows/Linux et release sur tag
 - [ ] O. Validation visuelle réelle du client Windows (poste utilisateur) et clôture du brief desktop
+
+## Reprise desktop — 2026-10-27
+- État GitHub vérifié : CI `40477005354` et Desktop `40477005378` réussis sur `18f153b`, deux plateformes et artefacts présents. Aucune release desktop à la reprise.
+- Serveur LXC 105 : service actif, `/api/system` répond.
+- Correction avant release : lecture du champ `status` imbriqué dans `state.json` pour afficher les vrais compteurs de l'agent ; test de régression ajouté.
+- Tests Rust agent ajoutés : chemins cachés/temporaires, signatures PDF/PNG/JPEG/BMP, texte latin-1, rejet des fausses signatures et octets nuls (2 tests locaux verts).
+- CI : suppression locale héritée de `DOCUMIND_DATA_DIR` conservée (isolation déjà assurée dans `tests/conftest.py`). Permission `contents: write` explicite pour la release : permission par défaut du dépôt vérifiée en lecture seule.
+- Publication prévue : tag `v0.1.0-desktop`, version du client 0.1.0 (distincte du serveur 1.0.0). Validation des nouveaux workflows en cours.

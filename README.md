@@ -173,7 +173,7 @@ For agents and advanced usage (API details, errors, multi-document handling), se
 
 Le client PC réutilise exactement l'interface web (export statique Next.js) dans
 une fenêtre native Tauri 2 — environ 10 Mo, WebView du système, aucun Electron.
-Téléchargez l'installeur depuis la page **Releases** du dépôt :
+Téléchargez l'installeur depuis la page [**Releases**](https://github.com/AlexandrLebegue/Documind/releases) du dépôt :
 
 - **Windows** : `DocuMind_<version>_x64-setup.exe` (NSIS, inclut `documind-agent.exe`)
 - **Linux** : `.AppImage` ou `.deb` (dépendances `webkit2gtk-4.1`)

@@ -44,8 +44,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pytest
       - name: Run tests
-        env:
-          DOCUMIND_DATA_DIR: ${{ runner.temp }}/documind-data
         run: pytest -q
 
   agent:

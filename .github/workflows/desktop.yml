@@ -10,6 +10,9 @@ on:
       - ".github/workflows/desktop.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build ${{ matrix.label }}
@@ -99,6 +102,9 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --bundles ${{ matrix.bundles }}
+
+      - name: Test desktop state decoding
+        run: cargo test --release -p documind-desktop --lib --manifest-path desktop/Cargo.toml
 
       - name: Upload workflow artifacts (non-tag builds)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
