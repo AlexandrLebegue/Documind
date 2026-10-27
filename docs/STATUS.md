@@ -74,4 +74,9 @@
 - Correction avant release : lecture du champ `status` imbriqué dans `state.json` pour afficher les vrais compteurs de l'agent ; test de régression ajouté.
 - Tests Rust agent ajoutés : chemins cachés/temporaires, signatures PDF/PNG/JPEG/BMP, texte latin-1, rejet des fausses signatures et octets nuls (2 tests locaux verts).
 - CI : suppression locale héritée de `DOCUMIND_DATA_DIR` conservée (isolation déjà assurée dans `tests/conftest.py`). Permission `contents: write` explicite pour la release : permission par défaut du dépôt vérifiée en lecture seule.
-- Publication prévue : tag `v0.1.0-desktop`, version du client 0.1.0 (distincte du serveur 1.0.0). Validation des nouveaux workflows en cours.
+- **Jalon 4 terminé** : tag `v0.1.0-desktop` sur `72033d3`, client 0.1.0 (distinct du serveur 1.0.0).
+- [CI main](https://github.com/AlexandrLebegue/Documind/actions/runs/40478874136) verte (frontend, backend, agent) ; [Desktop main](https://github.com/AlexandrLebegue/Documind/actions/runs/40478874044) vert sur Windows/Linux, tests desktop inclus.
+- [Workflow du tag](https://github.com/AlexandrLebegue/Documind/actions/runs/40479731250) entièrement vert sur les deux plateformes.
+- [Release publiée](https://github.com/AlexandrLebegue/Documind/releases/tag/v0.1.0-desktop), non brouillon : `DocuMind_0.1.0_x64-setup.exe` (3 157 423 octets), `DocuMind_0.1.0_amd64.AppImage` (82 983 416 octets), `DocuMind_0.1.0_amd64.deb` (4 574 458 octets). Trois fichiers confirmés `uploaded` par l'API GitHub avec empreintes SHA-256.
+- Paquet Debian publié téléchargé et inspecté : `usr/bin/documind-desktop` et `usr/bin/documind-agent` présents. Test local de lecture des compteurs desktop vert ; les deux tests agent sont verts.
+- Reste hors jalon 4 : validation visuelle et UAC/service sur un vrai poste Windows utilisateur (TODO O). Les builds Windows réussis ne remplacent pas cette validation interactive.
