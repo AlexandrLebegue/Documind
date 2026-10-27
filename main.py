@@ -493,6 +493,8 @@ async def list_docs(
     date_from: Optional[str] = Query(None, description="Filter doc_date >= this value"),
     date_to: Optional[str] = Query(None, description="Filter doc_date <= this value"),
     q: Optional[str] = Query(None, description="Full-text search query"),
+    filename: Optional[str] = Query(None, description="Exact original filename"),
+    include_segmented: bool = Query(False, description="Include segmented source rows"),
     limit: int = Query(50, ge=1, le=200, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
 ) -> DocumentListResponse:
@@ -503,8 +505,10 @@ async def list_docs(
         date_from=date_from,
         date_to=date_to,
         q=q,
+        filename=filename,
         limit=limit,
         offset=offset,
+        exclude_segmented=not include_segmented,
     )
     total = count_documents(
         doc_type=doc_type,
@@ -512,6 +516,8 @@ async def list_docs(
         date_from=date_from,
         date_to=date_to,
         q=q,
+        filename=filename,
+        exclude_segmented=not include_segmented,
     )
     documents = [_parse_document(row) for row in rows]
     return DocumentListResponse(

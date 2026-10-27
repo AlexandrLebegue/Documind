@@ -482,6 +482,7 @@ def _build_filter_clauses(
     date_from: str | None = None,
     date_to: str | None = None,
     q: str | None = None,
+    filename: str | None = None,
     exclude_segmented: bool = True,
 ) -> tuple[str, str, list[Any]]:
     """Build shared FROM/JOIN and WHERE fragments for document queries.
@@ -518,6 +519,9 @@ def _build_filter_clauses(
     if date_to is not None:
         conditions.append("d.doc_date <= ?")
         params.append(date_to)
+    if filename is not None:
+        conditions.append("d.filename = ?")
+        params.append(filename)
     if exclude_segmented:
         conditions.append("(d.status IS NULL OR d.status != 'segmented')")
 
@@ -531,6 +535,7 @@ def list_documents(
     date_from: str | None = None,
     date_to: str | None = None,
     q: str | None = None,
+    filename: str | None = None,
     limit: int = 50,
     offset: int = 0,
     exclude_segmented: bool = True,
@@ -551,7 +556,7 @@ def list_documents(
     """
     base, where, params = _build_filter_clauses(
         doc_type=doc_type, emetteur=emetteur,
-        date_from=date_from, date_to=date_to, q=q,
+        date_from=date_from, date_to=date_to, q=q, filename=filename,
         exclude_segmented=exclude_segmented,
     )
     sql = f"{base}{where} ORDER BY d.created_at DESC LIMIT ? OFFSET ?;"
@@ -568,6 +573,7 @@ def count_documents(
     date_from: str | None = None,
     date_to: str | None = None,
     q: str | None = None,
+    filename: str | None = None,
     exclude_segmented: bool = True,
 ) -> int:
     """Return the total number of documents matching the given filters.
@@ -577,7 +583,7 @@ def count_documents(
     """
     base, where, params = _build_filter_clauses(
         doc_type=doc_type, emetteur=emetteur,
-        date_from=date_from, date_to=date_to, q=q,
+        date_from=date_from, date_to=date_to, q=q, filename=filename,
         exclude_segmented=exclude_segmented,
     )
     # Replace the SELECT columns with COUNT(*)

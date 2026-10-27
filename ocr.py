@@ -362,7 +362,7 @@ def _ocr_jpeg_page(
     return text
 
 
-def extract_pages(file_path: str, progress_cb=None) -> list[str]:
+def extract_pages(file_path: str, progress_cb=None, info: dict | None = None) -> list[str]:
     """Extract text for every page of a PDF or image.
 
     Native PDF text is kept when it is long enough; otherwise the page is
@@ -372,6 +372,7 @@ def extract_pages(file_path: str, progress_cb=None) -> list[str]:
         file_path: Path to a PDF or image file.
         progress_cb: Optional callable ``(pages_done, pages_total)`` invoked
             once before processing and after every page.
+        info: Optional dict filled with ``backends`` (set of used backends).
 
     Returns:
         List of page texts.
@@ -383,6 +384,7 @@ def extract_pages(file_path: str, progress_cb=None) -> list[str]:
     ext = path.suffix.lower()
     backend = OCR_BACKEND if OCR_BACKEND in ("ovis", "tesseract") else "ovis"
     file_hash = _file_sha256(path)
+    used_backends: set[str] = set()
 
     if ext == ".pdf":
         doc = fitz.open(str(path))
@@ -397,6 +399,7 @@ def extract_pages(file_path: str, progress_cb=None) -> list[str]:
 
             if len(native_text) >= MIN_TEXT_LENGTH_PER_PAGE:
                 page_text = native_text
+                used_backends.add("native")
                 logger.debug(
                     "Page %d/%d: native text (%d chars)",
                     page_num + 1,
@@ -405,6 +408,7 @@ def extract_pages(file_path: str, progress_cb=None) -> list[str]:
                 )
             else:
                 jpeg = _render_pdf_page_jpeg(page, OCR_DPI)
+                used_backends.add(backend)
                 try:
                     page_text = _ocr_jpeg_page(
                         jpeg, file_hash, page_num + 1, backend
@@ -422,17 +426,20 @@ def extract_pages(file_path: str, progress_cb=None) -> list[str]:
                 progress_cb(page_num + 1, total)
 
         doc.close()
+        if info is not None:
+            info["backends"] = used_backends
         logger.info(
             "Extracted %d page(s) from PDF %s (backend=%s)",
             total,
             path.name,
-            backend,
+            "+".join(sorted(used_backends)) or backend,
         )
         return pages
 
     if ext in {".jpg", ".jpeg", ".png", ".tiff", ".webp"}:
         if progress_cb:
             progress_cb(0, 1)
+        used_backends.add(backend)
         if backend == "ovis":
             jpeg = _image_file_to_jpeg(path)
             try:
@@ -448,6 +455,8 @@ def extract_pages(file_path: str, progress_cb=None) -> list[str]:
             text = extract_text_from_image(str(path))
         if progress_cb:
             progress_cb(1, 1)
+        if info is not None:
+            info["backends"] = used_backends
         return [text]
 
     raise ValueError(

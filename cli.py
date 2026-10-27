@@ -381,79 +381,197 @@ def cmd_delete(args) -> int:
     return 0
 
 
+BENCH_FIELDS = [
+    "file", "filename", "doc_id", "status", "pages", "documents",
+    "ocr_seconds", "ocr_s_per_page", "llm_seconds", "wall_seconds",
+    "rss_mb", "peak_rss_mb", "ocr_backend", "types", "titles", "error",
+]
+
+
+def _write_bench_csv(path: Path, rows: list[dict]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=BENCH_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(rows)
+    os.replace(tmp, path)
+
+
+def _read_bench_csv(path: Path) -> dict[str, dict]:
+    if not path.exists():
+        return {}
+    with path.open(newline="", encoding="utf-8") as fh:
+        return {row["file"]: row for row in csv.DictReader(fh) if row.get("file")}
+
+
+def _bench_blank_row(path: Path) -> dict:
+    return {
+        "file": str(path),
+        "filename": path.name,
+        "doc_id": "",
+        "status": "error",
+        "pages": 0,
+        "documents": 0,
+        "ocr_seconds": "",
+        "ocr_s_per_page": "",
+        "llm_seconds": "",
+        "wall_seconds": "",
+        "rss_mb": "",
+        "peak_rss_mb": "",
+        "ocr_backend": "",
+        "types": "",
+        "titles": "",
+        "error": "",
+    }
+
+
+def _bench_fill(row: dict, doc: dict, segments: list[dict], system: dict, wall: float) -> None:
+    pages = doc.get("pages_total") or 0
+    ocr_seconds = doc.get("ocr_seconds")
+    llm_seconds = doc.get("llm_seconds")
+    if llm_seconds is None and segments:
+        llm_seconds = sum(s.get("llm_seconds") or 0 for s in segments)
+    row.update(
+        {
+            "status": doc.get("status"),
+            "pages": pages,
+            "documents": len(segments) or 1,
+            "ocr_seconds": round(ocr_seconds, 2) if ocr_seconds is not None else "",
+            "ocr_s_per_page": round(ocr_seconds / pages, 2) if ocr_seconds and pages else "",
+            "llm_seconds": round(llm_seconds, 2) if llm_seconds is not None else "",
+            "wall_seconds": round(wall, 2),
+            "rss_mb": system.get("rss_mb"),
+            "peak_rss_mb": system.get("peak_rss_mb"),
+            "ocr_backend": doc.get("ocr_backend") or "",
+            "types": "|".join(sorted({(s.get("doc_type") or "-") for s in segments})) if segments else (doc.get("doc_type") or "-"),
+            "titles": " | ".join((s.get("title") or s.get("filename") or "") for s in segments) if segments else (doc.get("title") or doc.get("filename") or ""),
+            "error": doc.get("error_message") or "",
+        }
+    )
+
+
+def _doc_is_queued(doc_id: str) -> bool:
+    queue = _get("/api/queue")
+    ids = set()
+    active = queue.get("active")
+    if active and active.get("id"):
+        ids.add(active["id"])
+    for item in queue.get("pending", []):
+        if item.get("id"):
+            ids.add(item["id"])
+    return doc_id in ids
+
+
+def _bench_process(path: Path, previous: dict | None, on_update=None) -> tuple[dict, dict]:
+    row = dict(previous) if previous else _bench_blank_row(path)
+    started = time.time()
+    if previous and previous.get("doc_id"):
+        doc_id = previous["doc_id"]
+        row["doc_id"] = doc_id
+        try:
+            doc = _get(f"/api/documents/{doc_id}")
+            finished = (
+                doc.get("status") in {"ready", "segmented"}
+                and doc.get("total_seconds") is not None
+            )
+            if not finished:
+                stuck = (
+                    doc.get("status") in {"queued", "processing"}
+                    and not _doc_is_queued(doc_id)
+                )
+                if doc.get("status") not in {"queued", "processing"} or stuck:
+                    _post(f"/api/documents/{doc_id}/reprocess", timeout=120)
+                doc = wait_for_document(doc_id)
+        except ApiError as exc:
+            row["status"] = "error"
+            row["error"] = str(exc)
+            return row, None
+    else:
+        resp = upload_file(path)
+        doc_id = resp["id"]
+        row["doc_id"] = doc_id
+        row["status"] = "queued"
+        if on_update is not None:
+            on_update(row)
+        try:
+            doc = wait_for_document(doc_id)
+        except ApiError as exc:
+            row["status"] = "error"
+            row["error"] = str(exc)
+            return row, None
+    segments = _get(f"/api/documents/{doc_id}/segments") if doc.get("status") == "segmented" else []
+    system = _get("/api/system")
+    _bench_fill(row, doc, segments, system, time.time() - started)
+    return row, doc
+
+
 def cmd_bench(args) -> int:
-    files, skipped = _expand_paths([args.directory])
+    paths: list[str] = []
+    if args.files_from:
+        paths.extend(
+            line.strip()
+            for line in Path(args.files_from).expanduser().read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+    if args.directory:
+        paths.append(args.directory)
+    if not paths:
+        raise ApiError("Indiquer un dossier ou --files-from")
+    files, skipped = _expand_paths(paths)
+
     out_path = Path(args.out).expanduser()
     if out_path.is_dir():
         out_path = out_path / time.strftime("bench_%Y%m%d_%H%M%S.csv")
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    rows = []
+
+    previous_rows = _read_bench_csv(out_path) if args.resume else {}
+    rows_by_file = dict(previous_rows)
+    order = [str(p) for p in files]
+
     for index, path in enumerate(files, 1):
+        key = str(path)
+        previous = previous_rows.get(key)
+        if (
+            previous
+            and previous.get("status") in {"ready", "segmented"}
+            and previous.get("ocr_seconds") not in {"", None}
+        ):
+            rows_by_file[key] = previous
+            print(f"[{index}/{len(files)}] skip (done) {path}", file=sys.stderr)
+            continue
         print(f"[{index}/{len(files)}] {path}", file=sys.stderr)
-        started = time.time()
-        row = {
-            "file": str(path),
-            "filename": path.name,
-            "status": "error",
-            "pages": 0,
-            "documents": 0,
-            "ocr_seconds": "",
-            "ocr_s_per_page": "",
-            "llm_seconds": "",
-            "wall_seconds": "",
-            "rss_mb": "",
-            "peak_rss_mb": "",
-            "types": "",
-            "titles": "",
-            "error": "",
-        }
+        def persist(partial: dict, key: str = key) -> None:
+            rows_by_file[key] = partial
+            current = [rows_by_file[k] for k in order if k in rows_by_file]
+            current.extend(r for k, r in rows_by_file.items() if k not in order)
+            _write_bench_csv(out_path, current)
+
         try:
-            resp = upload_file(path)
-            doc = wait_for_document(resp["id"])
-            segments = _get(f"/api/documents/{resp['id']}/segments") if doc.get("status") == "segmented" else []
-            system = _get("/api/system")
-            pages = doc.get("pages_total") or 0
-            ocr_seconds = doc.get("ocr_seconds")
-            llm_seconds = doc.get("llm_seconds") or (sum(s.get("llm_seconds") or 0 for s in segments) if segments else None)
-            row.update(
-                {
-                    "status": doc.get("status"),
-                    "pages": pages,
-                    "documents": len(segments) or 1,
-                    "ocr_seconds": round(ocr_seconds, 2) if ocr_seconds is not None else "",
-                    "ocr_s_per_page": round(ocr_seconds / pages, 2) if ocr_seconds and pages else "",
-                    "llm_seconds": round(llm_seconds, 2) if llm_seconds is not None else "",
-                    "wall_seconds": round(time.time() - started, 2),
-                    "rss_mb": system.get("rss_mb"),
-                    "peak_rss_mb": system.get("peak_rss_mb"),
-                    "types": "|".join(sorted({(s.get("doc_type") or "-") for s in segments})) if segments else (doc.get("doc_type") or "-"),
-                    "titles": " | ".join((s.get("title") or s.get("filename") or "") for s in segments) if segments else (doc.get("title") or doc.get("filename") or ""),
-                    "error": doc.get("error_message") or "",
-                }
-            )
+            row, doc = _bench_process(path, previous, on_update=persist)
         except (ApiError, OSError) as exc:
-            row["wall_seconds"] = round(time.time() - started, 2)
+            row = dict(previous) if previous else _bench_blank_row(path)
+            row["status"] = "error"
+            row["wall_seconds"] = ""
             row["error"] = str(exc)
-        rows.append(row)
+            doc = None
+        rows_by_file[key] = row
+        order_rows = [rows_by_file[k] for k in order if k in rows_by_file]
+        extra = [r for k, r in rows_by_file.items() if k not in order]
+        _write_bench_csv(out_path, order_rows + extra)
         print(
             f"    {row['status']} pages={row['pages']} docs={row['documents']} "
             f"ocr={row['ocr_seconds']}s llm={row['llm_seconds']}s wall={row['wall_seconds']}s",
             file=sys.stderr,
         )
 
-    fields = list(rows[0].keys()) if rows else [
-        "file", "filename", "status", "pages", "documents", "ocr_seconds",
-        "ocr_s_per_page", "llm_seconds", "wall_seconds", "rss_mb",
-        "peak_rss_mb", "types", "titles", "error",
-    ]
-    with out_path.open("w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
+    rows = [rows_by_file[k] for k in order if k in rows_by_file]
+    rows.extend(r for k, r in rows_by_file.items() if k not in order)
+    _write_bench_csv(out_path, rows)
 
-    total_pages = sum(r["pages"] or 0 for r in rows)
-    total_ocr = sum(float(r["ocr_seconds"]) for r in rows if r["ocr_seconds"] != "")
-    total_llm = sum(float(r["llm_seconds"]) for r in rows if r["llm_seconds"] != "")
+    total_pages = sum(int(r["pages"] or 0) for r in rows)
+    total_ocr = sum(float(r["ocr_seconds"]) for r in rows if r["ocr_seconds"] not in {"", None})
+    total_llm = sum(float(r["llm_seconds"]) for r in rows if r["llm_seconds"] not in {"", None})
+    errors = [r for r in rows if r["status"] == "error"]
     summary = {
         "csv": str(out_path),
         "files": len(files),
@@ -462,18 +580,17 @@ def cmd_bench(args) -> int:
         "ocr_seconds": round(total_ocr, 2),
         "ocr_s_per_page": round(total_ocr / total_pages, 2) if total_pages else None,
         "llm_seconds": round(total_llm, 2),
-        "errors": [r for r in rows if r["status"] == "error"],
+        "errors": errors,
     }
     if args.human:
         print(f"CSV: {out_path}")
         print(f"{summary['files']} fichier(s), {summary['pages']} page(s)")
         print(f"OCR: {summary['ocr_seconds']}s ({summary['ocr_s_per_page']} s/page), LLM: {summary['llm_seconds']}s")
-        if summary["errors"]:
-            print(f"{len(summary['errors'])} erreur(s)")
+        if errors:
+            print(f"{len(errors)} erreur(s)")
     else:
         _print_json(summary)
-    return 0 if not summary["errors"] else 1
-
+    return 0 if not errors else 1
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="documind", description="Client CLI Documind")
@@ -532,8 +649,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_delete)
 
     p = sub.add_parser("bench", help="Ingérer un dossier et écrire un CSV de mesures")
-    p.add_argument("directory")
+    p.add_argument("directory", nargs="?")
+    p.add_argument("--files-from", help="Fichier texte listant les chemins à mesurer")
     p.add_argument("--out", default="bench.csv")
+    p.add_argument("--resume", action="store_true", help="Reprendre un CSV existant")
     p.set_defaults(func=cmd_bench)
 
     return parser

@@ -93,6 +93,7 @@ def _process_segment(
     llm: httpx.Client,
     embedding_model,
     segment_title: str | None = None,
+    ocr_backend: str = OCR_BACKEND,
 ) -> bool:
     """Run metadata + embedding for one document (or one segment).
 
@@ -109,7 +110,7 @@ def _process_segment(
             page_end=page_start + len(pages) - 1,
             pages_done=len(pages),
             pages_total=len(pages),
-            ocr_backend=OCR_BACKEND,
+            ocr_backend=ocr_backend,
         )
         metadata = extract_metadata(llm, text)
         if segment_title and (
@@ -191,8 +192,9 @@ def process_document(
 
     overall_started = time.perf_counter()
     ocr_started = time.perf_counter()
+    ocr_info: dict = {}
     try:
-        pages = extract_pages(file_path, progress_cb=_progress)
+        pages = extract_pages(file_path, progress_cb=_progress, info=ocr_info)
     except Exception as exc:
         logger.error(
             "OCR failed for doc %s:\n%s", doc_id, traceback.format_exc()
@@ -204,8 +206,9 @@ def process_document(
     if not pages:
         pages = [""]
     total = len(pages)
-    update_document_progress(doc_id, total, total, OCR_BACKEND)
-    update_document_fields(doc_id, ocr_seconds=ocr_seconds)
+    ocr_label = "+".join(sorted(ocr_info.get("backends", []))) or OCR_BACKEND
+    update_document_progress(doc_id, total, total, ocr_label)
+    update_document_fields(doc_id, ocr_seconds=ocr_seconds, ocr_backend=ocr_label)
 
     try:
         segments = segment_documents(llm, pages)
@@ -227,7 +230,7 @@ def process_document(
             status="segmented",
             pages_done=total,
             pages_total=total,
-            ocr_backend=OCR_BACKEND,
+            ocr_backend=ocr_label,
         )
 
         for segment in segments:
@@ -251,6 +254,7 @@ def process_document(
                 llm=llm,
                 embedding_model=embedding_model,
                 segment_title=segment.get("titre"),
+                ocr_backend=ocr_label,
             )
         children = get_child_documents(doc_id)
         update_document_fields(
@@ -270,6 +274,7 @@ def process_document(
         page_start=1,
         llm=llm,
         embedding_model=embedding_model,
+        ocr_backend=ocr_label,
     )
     update_document_fields(
         doc_id,
@@ -308,6 +313,7 @@ def reprocess_document(
             page_start=start,
             llm=llm,
             embedding_model=embedding_model,
+            ocr_backend=ocr_label,
         )
         return
 
@@ -331,14 +337,18 @@ def reprocess_document(
         return
 
     # Re-OCR from the original file (OCR page cache makes this cheap).
+    ocr_info: dict = {}
+    ocr_label = OCR_BACKEND
+
     def _progress(done: int, total: int) -> None:
         try:
-            update_document_progress(doc_id, done, total, OCR_BACKEND)
+            update_document_progress(doc_id, done, total, ocr_label)
         except Exception:
             logger.debug("Could not persist OCR progress", exc_info=True)
 
     try:
-        pages = extract_pages(file_path, progress_cb=_progress)
+        pages = extract_pages(file_path, progress_cb=_progress, info=ocr_info)
+        ocr_label = "+".join(sorted(ocr_info.get("backends", []))) or OCR_BACKEND
     except Exception as exc:
         logger.error("Reprocess OCR failed for doc %s:\n%s", doc_id, traceback.format_exc())
         _mark_error(doc_id, "ocr", exc)
@@ -354,6 +364,7 @@ def reprocess_document(
             page_start=start,
             llm=llm,
             embedding_model=embedding_model,
+            ocr_backend=ocr_label,
         )
         return
 
