@@ -186,6 +186,7 @@ _KEYWORD_RULES: list[tuple[str, list[str]]] = [
         r"\bscolarite\b",
         r"\bdiplome\b",
         r"\bbaccalaureat\b",
+        r"\bbac\b",
         r"\breleve de notes\b",
         r"\breleve des notes\b",
         r"\bvoltaire\b",
@@ -360,16 +361,18 @@ def _score_patterns(patterns: list[str], haystack: str) -> int:
     return score
 
 
-def _best_type(haystack: str, prefer_first: bool = False) -> str | None:
-    """Pick the best type in *haystack*.
+def _best_match(haystack: str, prefer_first: bool = False) -> tuple[str | None, int]:
+    """Pick the best type in *haystack* and return ``(type, score)``.
 
     When *prefer_first* is true (titles), the earliest keyword position wins;
     this classifies "Attestation de paiement de facture" as an attestation
     rather than a facture.  Otherwise the highest score wins.
     """
     if not haystack:
-        return None
-    best: tuple | None = None
+        return None, 0
+    best_candidate: tuple | None = None
+    best_type: str | None = None
+    best_score = 0
     for order, (doc_type, patterns) in enumerate(_KEYWORD_RULES):
         score = 0
         first_pos: int | None = None
@@ -383,9 +386,30 @@ def _best_type(haystack: str, prefer_first: bool = False) -> str | None:
                 candidate = (-(first_pos if first_pos is not None else 10**6), score, -order, doc_type)
             else:
                 candidate = (score, -order, doc_type)
-            if best is None or candidate > best:
-                best = candidate
-    return best[-1] if best else None
+            if best_candidate is None or candidate > best_candidate:
+                best_candidate = candidate
+                best_type = doc_type
+                best_score = score
+    return best_type, best_score
+
+
+def _best_type(haystack: str, prefer_first: bool = False) -> str | None:
+    return _best_match(haystack, prefer_first=prefer_first)[0]
+
+
+def classify_short_match(
+    *,
+    title: str = "",
+    emetteur: str = "",
+    resume: str = "",
+    tags: list[str] | None = None,
+) -> tuple[str | None, int]:
+    """Return ``(type, score)`` from title/issuer/tags, then summary."""
+    title_hay = _norm(" ".join([title or "", emetteur or "", " ".join(tags or [])]))
+    matched, score = _best_match(title_hay, prefer_first=True)
+    if matched:
+        return matched, score
+    return _best_match(_norm(resume))
 
 
 def classify_short(
@@ -396,11 +420,7 @@ def classify_short(
     tags: list[str] | None = None,
 ) -> str | None:
     """Classify from the strongest signals: title/issuer/tags, then summary."""
-    title_hay = _norm(" ".join([title or "", emetteur or "", " ".join(tags or [])]))
-    matched = _best_type(title_hay, prefer_first=True)
-    if matched:
-        return matched
-    return _best_type(_norm(resume))
+    return classify_short_match(title=title, emetteur=emetteur, resume=resume, tags=tags)[0]
 
 
 def classify_text(text: str) -> str | None:
@@ -428,6 +448,7 @@ def normalize_doc_type(
     resume: str = "",
     tags: list[str] | None = None,
     text: str = "",
+    filename: str = "",
 ) -> str:
     """Map an LLM type to a canonical type using title, aliases, then text.
 
@@ -439,21 +460,38 @@ def normalize_doc_type(
     raw = _norm(raw_type).replace(" ", "_")
     aliased = _alias_lookup(raw)
 
-    keyword_type = classify_short(
-        title=title,
-        emetteur=emetteur,
-        resume=resume,
-        tags=tags,
-    )
-    if keyword_type:
-        return keyword_type
+    title_hay = _norm(" ".join([title or "", emetteur or ""]))
+    title_type, _ = _best_match(title_hay, prefer_first=True)
+    resume_type, _ = _best_match(_norm(" ".join([resume or "", " ".join(tags or [])])))
+    file_type, file_score = _best_match(_norm(filename), prefer_first=True)
+    text_type, text_score = _best_match(_norm((text or "")[:12000]))
+
+    # The filename can correct a wrong title when the OCR text agrees with it
+    # (e.g. a RIB whose LLM title was "Fiche de paie").
+    specific_file_types = {
+        "identite", "scolarite", "sante", "banque", "emploi",
+        "logement", "administratif", "fiche_de_paie", "avis_imposition",
+        "quittance",
+    }
+    if title_type:
+        if (
+            file_type in specific_file_types
+            and file_type != title_type
+            and text_type == file_type
+            and text_score >= 2
+            and file_score >= 1
+        ):
+            return file_type
+        return title_type
+    if resume_type:
+        return resume_type
+    if file_type:
+        return file_type
 
     broad = {"autre", "identite", "contrat", "attestation", "administratif"}
-    text_type = classify_text(text)
     if aliased in broad or (aliased is None and raw in broad):
         if text_type:
             return text_type
-
     if aliased and aliased != "autre":
         return aliased
     if raw in VALID_DOC_TYPES:
@@ -488,7 +526,7 @@ def _meaningful_filename(filename: str | None) -> str | None:
     if not cleaned:
         return None
     folded = _norm(cleaned)
-    if len(folded) < 4:
+    if len(folded) < 3:
         return None
     if folded in _GENERIC_TITLES:
         return None
@@ -552,13 +590,13 @@ def finalize_metadata(
             part for part in (
                 str(metadata.get("titre") or ""),
                 str(preferred_title or ""),
-                filename_hint,
             ) if part
         ),
         emetteur=str(metadata.get("emetteur") or ""),
         resume=str(metadata.get("resume") or ""),
         tags=metadata.get("tags") if isinstance(metadata.get("tags"), list) else None,
         text=text,
+        filename=filename_hint,
     )
     metadata["titre"] = build_title(
         metadata=metadata,

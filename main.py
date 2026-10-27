@@ -46,6 +46,7 @@ from database import (
     get_child_documents,
     find_document_by_hash,
     update_document_hash,
+    list_documents_for_reprocess,
     list_root_documents_for_dedupe,
 )
 from models import (
@@ -577,9 +578,9 @@ async def reprocess_all_documents() -> JSONResponse:
             status_code=503,
             detail="LLM or embedding model not loaded. Cannot reprocess.",
         )
-    roots = list_root_documents_for_dedupe()
+    documents = list_documents_for_reprocess()
     queued = 0
-    for row in roots:
+    for row in documents:
         await _enqueue_reprocess(row["id"], row["filename"], app)
         queued += 1
     logger.info("Bulk reprocess queued for %d root document(s)", queued)

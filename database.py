@@ -1001,6 +1001,30 @@ def list_root_documents_for_dedupe() -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def list_documents_for_reprocess() -> list[dict[str, Any]]:
+    """Return every independently processable document.
+
+    Segment children are processed on their own; a segmented source row is
+    skipped because its children already hold the extracted metadata.
+    """
+    with _get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, filename, created_at, page_start
+            FROM documents AS d
+            WHERE d.status != 'segmented'
+              AND (
+                    d.parent_id IS NOT NULL
+                    OR NOT EXISTS (
+                        SELECT 1 FROM documents AS c WHERE c.parent_id = d.id
+                    )
+              )
+            ORDER BY d.created_at ASC, d.page_start ASC;
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_stats() -> dict[str, Any]:
     """Return aggregate statistics about the document collection.
 
