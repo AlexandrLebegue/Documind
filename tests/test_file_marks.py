@@ -53,3 +53,39 @@ def test_delete():
     upsert_file_mark(sha, verdict="pending")
     delete_file_mark(sha)
     assert get_file_mark(sha) is None
+
+
+def test_archive_migration_is_idempotent_and_preserves_verdicts():
+    from database import insert_document, update_document_hash
+
+    sha = "10" * 32
+    insert_document("legacy-root", "legacy.pdf", "/archive/legacy.pdf")
+    update_document_hash("legacy-root", sha)
+    init_db()
+    first = get_file_mark(sha)
+    assert first["verdict"] == "accepted"
+    assert first["doc_id"] == "legacy-root"
+    assert first["source"] == "archive"
+    init_db()
+    assert get_file_mark(sha) == first
+
+    for index, verdict in enumerate(["accepted", "rejected", "pending", "error"]):
+        digest = f"{index + 20:02x}" * 32
+        doc_id = f"preserve-mark-{index}"
+        insert_document(doc_id, "existing.pdf", "/archive/existing.pdf")
+        update_document_hash(doc_id, digest)
+        upsert_file_mark(digest, verdict=verdict, reason="explicit verdict", source="agent")
+        before = get_file_mark(digest)
+        init_db()
+        assert get_file_mark(digest) == before
+
+
+def test_archive_migration_ignores_missing_hashes_and_segment_children():
+    from database import insert_document, update_document_hash
+
+    insert_document("unhashed-root", "old.pdf", "/archive/old.pdf")
+    insert_document("segment-only", "segment.pdf", "/archive/old.pdf", parent_id="unhashed-root")
+    digest = "30" * 32
+    update_document_hash("segment-only", digest)
+    init_db()
+    assert get_file_mark(digest) is None

@@ -2058,7 +2058,8 @@ async def ingest_candidate(
         )
 
     sha256 = hashlib.sha256(content).hexdigest()
-    existing = get_file_mark(sha256)
+    existing_marks = get_file_marks_by_hashes([sha256])
+    existing = existing_marks[0] if existing_marks else None
     if existing is not None:
         if existing["verdict"] == "accepted" or not force:
             return IngestCandidateResponse(

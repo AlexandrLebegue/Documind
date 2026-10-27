@@ -76,3 +76,42 @@ def test_candidate_valid_is_queued(client, monkeypatch):
             break
         time.sleep(0.05)
     assert check["known"][0]["sha256"] == digest
+
+
+def test_check_finds_archive_added_after_startup(client):
+    import database
+
+    digest = hashlib.sha256(b"archived-via-web").hexdigest()
+    database.insert_document("web-archive", "web.pdf", "/archive/web.pdf")
+    database.update_document_hash("web-archive", digest)
+    assert database.get_file_mark(digest) is None
+    response = client.post("/api/ingest/check", json={"sha256": [digest, digest.upper()]})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["unknown"] == []
+    assert len(body["known"]) == 1
+    assert body["known"][0]["verdict"] == "accepted"
+    assert body["known"][0]["doc_id"] == "web-archive"
+    assert database.get_file_mark(digest)["verdict"] == "accepted"
+
+
+def test_candidate_does_not_queue_existing_archive_even_if_forced(client, monkeypatch):
+    import database
+
+    payload = b"%PDF-1.4\narchived" + b"x" * 2048
+    digest = hashlib.sha256(payload).hexdigest()
+    database.insert_document("candidate-archive", "archived.pdf", "/archive/archived.pdf")
+    database.update_document_hash("candidate-archive", digest)
+
+    def unexpected_process(*args):
+        pytest.fail("An existing archive must not be processed again")
+
+    monkeypatch.setattr(main, "process_candidate", unexpected_process)
+    response = client.post(
+        "/api/ingest/candidate",
+        files={"file": ("renamed.pdf", payload, "application/pdf")},
+        data={"force": "true"},
+    )
+    assert response.status_code == 202
+    assert response.json()["verdict"] == "accepted"
+    assert response.json()["queued"] is False

@@ -291,6 +291,9 @@ def init_db() -> None:
                 f"CREATE INDEX IF NOT EXISTS {idx} ON file_marks({col});"
             )
 
+        # Seed the sync ledger from documents archived before folder sync existed.
+        _backfill_archived_file_marks(conn)
+
         # Keep the query planner statistics fresh without a full rebuild.
         cur.execute("PRAGMA optimize;")
         conn.commit()
@@ -1587,12 +1590,44 @@ def get_file_mark(sha256: str) -> dict[str, Any] | None:
     return _row_to_dict(row)
 
 
+def _backfill_archived_file_marks(
+    conn: sqlite3.Connection, hashes: list[str] | None = None,
+) -> None:
+    """Seed missing marks without replacing explicit ingestion verdicts.
+
+    Root rows represent original files; segment children must not acquire
+    independent marks. Repeated migrations/checks preserve existing marks.
+    """
+    restriction = ""
+    params: list[Any] = []
+    if hashes is not None:
+        if not hashes:
+            return
+        restriction = " AND file_hash IN (" + ",".join("?" for _ in hashes) + ")"
+        params.extend(hashes)
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO file_marks
+            (sha256, verdict, doc_id, reason, source, filename, stored_path,
+             first_seen, verdict_at, updated_at)
+        SELECT file_hash, 'accepted', id, 'Document déjà archivé',
+               'archive', filename, filepath, created_at, updated_at, updated_at
+        FROM documents
+        WHERE parent_id IS NULL AND length(file_hash) = 64
+        """ + restriction + " ORDER BY created_at ASC, id ASC;",
+        params,
+    )
+
+
 def get_file_marks_by_hashes(hashes: list[str]) -> list[dict[str, Any]]:
-    """Return known marks for a list of SHA-256 values."""
+    """Return marks, including original files archived through other routes."""
     if not hashes:
         return []
     placeholders = ",".join("?" for _ in hashes)
     with _get_connection() as conn:
+        # Also covers web uploads added after the startup migration.
+        _backfill_archived_file_marks(conn, hashes)
+        conn.commit()
         rows = conn.execute(
             f"SELECT * FROM file_marks WHERE sha256 IN ({placeholders});",
             tuple(hashes),

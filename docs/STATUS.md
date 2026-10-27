@@ -80,3 +80,10 @@
 - [Release publiée](https://github.com/AlexandrLebegue/Documind/releases/tag/v0.1.0-desktop), non brouillon : `DocuMind_0.1.0_x64-setup.exe` (3 157 423 octets), `DocuMind_0.1.0_amd64.AppImage` (82 983 416 octets), `DocuMind_0.1.0_amd64.deb` (4 574 458 octets). Trois fichiers confirmés `uploaded` par l'API GitHub avec empreintes SHA-256.
 - Paquet Debian publié téléchargé et inspecté : `usr/bin/documind-desktop` et `usr/bin/documind-agent` présents. Test local de lecture des compteurs desktop vert ; les deux tests agent sont verts.
 - Reste hors jalon 4 : validation visuelle et UAC/service sur un vrai poste Windows utilisateur (TODO O). Les builds Windows réussis ne remplacent pas cette validation interactive.
+
+## Correctif archives déjà présentes — 2026-10-27
+- `/api/ingest/check` consulte aussi les empreintes des documents originaux archivés (y compris ajoutés via le web après le démarrage) et crée les marques manquantes `accepted`. `/candidate` utilise la même protection, même avec `force=true`.
+- Migration SQL idempotente au démarrage : rétro-remplissage depuis les originaux avec `file_hash`, sans modifier les marques/verdicts explicites existants ni créer de marques pour les segments enfants.
+- LXC 105 : sauvegarde SQLite locale avant migration ; 1 → 61 marques, second passage toujours 61, 0 original avec empreinte sans marque. Service redémarré, cas signalé vérifié via l'API réelle : 1 connu `accepted`, 0 inconnu, document lié.
+- 20 tests Python verts sur LXC 105, dont migration répétée, préservation des quatre verdicts, exclusion des segments/sans empreinte, archive ajoutée après démarrage, candidat déjà archivé non remis en file.
+- Aucun changement client/agent : release desktop `v0.1.0-desktop` conservée ; correctif uniquement serveur. Vérification GitHub CI du correctif en cours.
