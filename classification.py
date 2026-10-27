@@ -318,13 +318,36 @@ _GENERIC_TITLES = {
     "document long fusionne",
     "nouveau document",
     "piece jointe",
+    "pieces justificatives",
+    "justificatif",
+    "facture",
+    "bulletin de paie",
+    "avis d imposition",
+    "contrat",
+    "attestation",
+    "courrier",
+    "document bancaire",
+    "quittance",
+    "piece d identite",
+    "scolarite",
+    "sante",
+    "logement",
+    "emploi",
+    "document administratif",
     "image",
     "scan",
     "unknown",
 }
 
 _ALIAS_KEYS = sorted(ALIASES, key=len, reverse=True)
-_FAILED_TITLE_WORDS = ("document non identifie", "document administratif ocr")
+_FAILED_TITLE_WORDS = (
+    "document non identifie",
+    "document administratif non identifie",
+    "document non reconnu",
+    "non identifie",
+    "inconnu",
+    "document administratif ocr",
+)
 
 
 def _norm(value: str | None) -> str:
@@ -545,13 +568,17 @@ def build_title(
 ) -> str:
     """Return a useful title: type + issuer + date, filename fallback."""
     current = str(metadata.get("titre") or "").strip()
+    doc_type = metadata.get("type") or "autre"
     if current and not is_generic_title(current):
-        return current
+        current_type, _ = _best_match(_norm(current), prefer_first=True)
+        if not current_type or current_type == doc_type:
+            return current
 
     if preferred_title and not is_generic_title(preferred_title):
-        return str(preferred_title).strip()
+        preferred_type, _ = _best_match(_norm(preferred_title), prefer_first=True)
+        if not preferred_type or preferred_type == doc_type:
+            return str(preferred_title).strip()
 
-    doc_type = metadata.get("type") or "autre"
     label = TYPE_LABELS.get(doc_type, TYPE_LABELS["autre"])
     emetteur = str(metadata.get("emetteur") or "").strip()
     date = str(metadata.get("date") or "").strip()
