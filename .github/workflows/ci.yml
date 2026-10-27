@@ -25,6 +25,9 @@ jobs:
       - name: Typecheck
         working-directory: frontend
         run: npx tsc --noEmit
+      - name: Frontend regression tests
+        working-directory: frontend
+        run: npm test
       - name: Static export build
         working-directory: frontend
         run: npm run build

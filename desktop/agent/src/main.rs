@@ -9,7 +9,34 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+
+fn system_output(cmd: &mut Command) -> Result<Output, std::io::Error> {
+    use wait_timeout::ChildExt;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    if child
+        .wait_timeout(std::time::Duration::from_secs(10))?
+        .is_none()
+    {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "Délai de la commande système dépassé",
+        ));
+    }
+    child.wait_with_output()
+}
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -629,26 +656,31 @@ fn install_service() -> Result<(), String> {
     {
         let exe = std::env::current_exe().map_err(|err| err.to_string())?;
         let bin_path = format!("\"{}\"", exe.display());
-        let output = Command::new("sc")
-            .args([
-                "create",
-                SERVICE_NAME,
-                "binPath=",
-                &bin_path,
-                "start=",
-                "auto",
-                "DisplayName=",
-                "DocuMind Agent",
-            ])
-            .output()
-            .map_err(|err| err.to_string())?;
+        let output = system_output(Command::new("sc").args([
+            "create",
+            SERVICE_NAME,
+            "binPath=",
+            &bin_path,
+            "start=",
+            "auto",
+            "DisplayName=",
+            "DocuMind Agent",
+        ]))
+        .map_err(|err| err.to_string())?;
         if !output.status.success() {
-            let message = String::from_utf8_lossy(&output.stderr);
-            if !message.contains("183") && !message.contains("already exists") {
+            let message = String::from_utf8_lossy(&output.stdout);
+            if output.status.code() != Some(1073) {
                 return Err(format!("sc create: {}", message.trim()));
             }
         }
-        let _ = Command::new("sc").args(["start", SERVICE_NAME]).status();
+        let output = system_output(Command::new("sc").args(["start", SERVICE_NAME]))
+            .map_err(|err| err.to_string())?;
+        if !output.status.success() && output.status.code() != Some(1056) {
+            return Err(format!(
+                "sc start: {}",
+                String::from_utf8_lossy(&output.stdout)
+            ));
+        }
         log("INFO", "service Windows installé");
     }
     #[cfg(target_os = "linux")]
@@ -678,14 +710,15 @@ fn install_service() -> Result<(), String> {
             bin.display()
         );
         fs::write(unit_dir.join("documind-agent.service"), unit).map_err(|err| err.to_string())?;
-        let _ = Command::new("systemctl")
-            .args(["--user", "daemon-reload"])
-            .status();
-        let status = Command::new("systemctl")
-            .args(["--user", "enable", "--now", "documind-agent"])
-            .status()
-            .map_err(|err| err.to_string())?;
-        if !status.success() {
+        let _ = system_output(Command::new("systemctl").args(["--user", "daemon-reload"]));
+        let status = system_output(Command::new("systemctl").args([
+            "--user",
+            "enable",
+            "--now",
+            "documind-agent",
+        ]))
+        .map_err(|err| err.to_string())?;
+        if !status.status.success() {
             return Err("systemctl --user enable --now a échoué".into());
         }
         log("INFO", "service systemd --user installé");
@@ -696,14 +729,12 @@ fn install_service() -> Result<(), String> {
 fn uninstall_service() -> Result<(), String> {
     #[cfg(windows)]
     {
-        let _ = Command::new("sc").args(["stop", SERVICE_NAME]).status();
-        let output = Command::new("sc")
-            .args(["delete", SERVICE_NAME])
-            .output()
+        let _ = system_output(Command::new("sc").args(["stop", SERVICE_NAME]));
+        let output = system_output(Command::new("sc").args(["delete", SERVICE_NAME]))
             .map_err(|err| err.to_string())?;
         if !output.status.success() {
-            let message = String::from_utf8_lossy(&output.stderr);
-            if !message.contains("1060") {
+            let message = String::from_utf8_lossy(&output.stdout);
+            if output.status.code() != Some(1060) {
                 return Err(format!("sc delete: {}", message.trim()));
             }
         }
@@ -711,9 +742,12 @@ fn uninstall_service() -> Result<(), String> {
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = Command::new("systemctl")
-            .args(["--user", "disable", "--now", "documind-agent"])
-            .status();
+        let _ = system_output(Command::new("systemctl").args([
+            "--user",
+            "disable",
+            "--now",
+            "documind-agent",
+        ]));
         if let Some(home) = dirs::home_dir() {
             let unit = home
                 .join(".config")
@@ -722,9 +756,7 @@ fn uninstall_service() -> Result<(), String> {
                 .join("documind-agent.service");
             let _ = fs::remove_file(unit);
         }
-        let _ = Command::new("systemctl")
-            .args(["--user", "daemon-reload"])
-            .status();
+        let _ = system_output(Command::new("systemctl").args(["--user", "daemon-reload"]));
         log("INFO", "service systemd --user désinstallé");
     }
     Ok(())
@@ -811,7 +843,10 @@ enum Commands {
     /// Run a single scan and exit.
     Once,
     /// Install the Windows service / systemd user unit.
-    Install,
+    Install {
+        #[arg(long)]
+        from: Option<PathBuf>,
+    },
     /// Uninstall the service.
     Uninstall,
     /// Copy a configuration file to the canonical path.
@@ -855,7 +890,14 @@ fn main() {
             let _ = save_state(&state);
             result
         }
-        Some(Commands::Install) => install_service(),
+        Some(Commands::Install { from }) => (|| {
+            if let Some(path) = from {
+                let raw = fs::read(path).map_err(|err| err.to_string())?;
+                let config: Config = serde_json::from_slice(&raw).map_err(|err| err.to_string())?;
+                save_config(&config)?;
+            }
+            install_service()
+        })(),
         Some(Commands::Uninstall) => uninstall_service(),
         Some(Commands::Configure { from }) => (|| {
             let raw = fs::read_to_string(&from).map_err(|err| err.to_string())?;

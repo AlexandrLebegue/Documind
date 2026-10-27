@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getConfiguredServer, isDesktopApp } from '@/lib/api';
 import { toast } from '@/components/Toast';
 
@@ -33,6 +33,9 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
 }
 
 export default function AgentSettings() {
+  const configRef = useRef<AgentConfig | null>(null);
+  const writes = useRef<Promise<unknown>>(Promise.resolve());
+  const polling = useRef(false);
   const [desktop, setDesktop] = useState(false);
   const [server, setServer] = useState('');
   const [config, setConfig] = useState<AgentConfig | null>(null);
@@ -49,40 +52,58 @@ export default function AgentSettings() {
   const refresh = useCallback(async () => {
     if (!isDesktopApp()) return;
     try {
-      const [cfg, st] = await Promise.all([
-        invoke<AgentConfig>('agent_get_config'),
-        invoke<AgentStatus>('agent_status'),
-      ]);
-      setConfig(cfg);
+      if (polling.current) return;
+      polling.current = true;
+      const st = await invoke<AgentStatus>('agent_status');
       setStatus(st);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Agent indisponible');
+      setError(String(err));
+    } finally {
+      polling.current = false;
     }
   }, []);
 
   useEffect(() => {
     if (!desktop) return;
+    let cancelled = false;
+    invoke<AgentConfig>('agent_get_config').then((cfg) => {
+      if (!cancelled && !configRef.current) {
+        configRef.current = cfg;
+        setConfig(cfg);
+      }
+    }).catch((err) => { if (!cancelled) { setError(String(err)); toast(String(err), 'error'); } });
     refresh();
     const timer = setInterval(refresh, 10000);
-    return () => clearInterval(timer);
+    return () => { cancelled = true; clearInterval(timer); };
   }, [desktop, refresh]);
 
   if (!desktop) return null;
 
   const update = (patch: Partial<AgentConfig>) => {
-    setConfig((current) => (current ? { ...current, ...patch } : current));
+    const current = configRef.current;
+    if (!current) return;
+    const next = { ...current, ...patch };
+    configRef.current = next;
+    setConfig(next);
+    writes.current = writes.current.catch(() => undefined).then(() => invoke('agent_set_config', { config: next }));
+    void writes.current.catch((err) => {
+      setError(`Configuration non enregistrée : ${String(err)}`);
+      toast(String(err), 'error');
+    });
   };
 
   const save = async () => {
     if (!config) return;
     setBusy('save');
     try {
-      await invoke('agent_set_config', { config });
+      await writes.current.catch(() => undefined);
+      await invoke('agent_set_config', { config: configRef.current });
+      setError(null);
       toast('Configuration de synchronisation enregistrée', 'success');
       await refresh();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Enregistrement impossible', 'error');
+      toast(String(err), 'error');
     } finally {
       setBusy(null);
     }
@@ -102,22 +123,26 @@ export default function AgentSettings() {
   const browse = async () => {
     try {
       const folder = await invoke<string | null>('pick_folder');
-      if (folder && config && !config.folders.includes(folder)) {
-        update({ folders: [...config.folders, folder] });
+      if (folder && configRef.current && !configRef.current.folders.includes(folder)) {
+        update({ folders: [...configRef.current!.folders, folder] });
       }
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Sélecteur indisponible', 'error');
+      toast(String(err), 'error');
     }
   };
 
   const serviceAction = async (action: 'install' | 'uninstall') => {
     setBusy(action);
     try {
+      if (action === 'install') {
+        await writes.current;
+        await invoke('agent_set_config', { config: configRef.current });
+      }
       await invoke(action === 'install' ? 'agent_install' : 'agent_uninstall');
       toast(action === 'install' ? 'Service installé' : 'Service désinstallé', 'success');
       await refresh();
     } catch (err) {
-      toast(err instanceof Error ? err.message : 'Action impossible', 'error');
+      toast(String(err), 'error');
     } finally {
       setBusy(null);
     }
@@ -160,6 +185,7 @@ export default function AgentSettings() {
           <>
             <div className="space-y-2">
               <label className="block text-sm font-medium text-[#1a1a1a]">Dossiers surveillés</label>
+              <p className="text-xs text-[#6b7280]">Modifications enregistrées automatiquement sur ce PC. Après modification, appliquez la configuration au service pour activer la synchronisation.</p>
               {config.folders.length === 0 && (
                 <p className="text-sm text-[#9ca3af]">Aucun dossier pour l&apos;instant.</p>
               )}
@@ -222,7 +248,7 @@ export default function AgentSettings() {
               >
                 {busy === 'save' ? 'Enregistrement…' : 'Enregistrer la configuration'}
               </button>
-              {status?.installed ? (
+              {status?.installed ? (<>
                 <button
                   onClick={() => serviceAction('uninstall')}
                   disabled={busy !== null}
@@ -230,13 +256,14 @@ export default function AgentSettings() {
                 >
                   {busy === 'uninstall' ? 'Désinstallation…' : 'Désinstaller le service'}
                 </button>
-              ) : (
+                <button onClick={() => serviceAction('install')} disabled={busy !== null} className="rounded-lg border px-5 py-2 disabled:opacity-60">Appliquer au service (administrateur)</button>
+              </>) : (
                 <button
                   onClick={() => serviceAction('install')}
                   disabled={busy !== null}
                   className="min-h-[44px] rounded-lg border border-beige-300 px-5 text-sm font-medium text-[#1a1a1a] hover:bg-beige-50 disabled:opacity-60"
                 >
-                  {busy === 'install' ? 'Installation…' : 'Installer le service'}
+                  {busy === 'install' ? 'Installation…' : 'Installer / appliquer au service'}
                 </button>
               )}
             </div>

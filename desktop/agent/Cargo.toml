@@ -1,6 +1,6 @@
 [package]
 name = "documind-agent"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "DocuMind folder synchronisation agent"
 
@@ -17,6 +17,8 @@ walkdir = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 dirs = "5"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "rustls-tls"] }
+
+wait-timeout = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.7"

@@ -86,6 +86,13 @@ jobs:
           cp desktop/target/release/documind-agent.exe \
              desktop/src-tauri/binaries/documind-agent-${{ matrix.target }}.exe
 
+      - name: Test desktop and agent before publication
+        run: cargo test --workspace --manifest-path desktop/Cargo.toml
+
+      - name: Frontend regression tests
+        working-directory: frontend
+        run: npm test
+
       - name: Build Tauri app and release
         uses: tauri-apps/tauri-action@v0
         env:
