@@ -9,6 +9,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from classification import EXPIRABLE_TYPES
 from config import DB_PATH, SQLITE_CACHE_MB, SQLITE_MMAP_MB
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,11 @@ _local = threading.local()
 def _now_iso() -> str:
     """Return the current UTC time as an ISO-8601 string with 'Z' suffix."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def _alert_floor(days: int = 90) -> str:
+    """Oldest overdue date still worth an alert (avoids archived documents)."""
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
 
 
 def _get_connection() -> sqlite3.Connection:
@@ -113,6 +119,7 @@ def init_db() -> None:
             ("llm_seconds", "REAL"),
             ("total_seconds", "REAL"),
             ("error_message", "TEXT"),
+            ("file_hash", "TEXT"),
         ):
             try:
                 cur.execute(f"ALTER TABLE documents ADD COLUMN {col} {decl};")
@@ -252,6 +259,7 @@ def init_db() -> None:
             ("idx_documents_date_expiration", "date_expiration"),
             ("idx_documents_date_echeance", "date_echeance"),
             ("idx_documents_parent_id", "parent_id"),
+            ("idx_documents_file_hash", "file_hash"),
         ):
             cur.execute(
                 f"CREATE INDEX IF NOT EXISTS {idx} ON documents({col});"
@@ -952,6 +960,47 @@ def get_session_messages_for_llm(
 # Statistics
 # ---------------------------------------------------------------------------
 
+def find_document_by_hash(file_hash: str) -> dict[str, Any] | None:
+    """Return the oldest root document with this SHA-256, if any."""
+    if not file_hash:
+        return None
+    with _get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM documents
+            WHERE file_hash = ? AND parent_id IS NULL
+            ORDER BY created_at ASC LIMIT 1;
+            """,
+            (file_hash,),
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def update_document_hash(doc_id: str, file_hash: str) -> None:
+    """Persist the SHA-256 of the original file."""
+    with _get_connection() as conn:
+        conn.execute(
+            "UPDATE documents SET file_hash = ? WHERE id = ?;",
+            (file_hash, doc_id),
+        )
+        conn.commit()
+
+
+def list_root_documents_for_dedupe() -> list[dict[str, Any]]:
+    """Return root documents ordered by ingestion date (oldest first)."""
+    with _get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, filename, filepath, file_hash, created_at, status,
+                   parent_id
+            FROM documents
+            WHERE parent_id IS NULL
+            ORDER BY created_at ASC;
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def get_stats() -> dict[str, Any]:
     """Return aggregate statistics about the document collection.
 
@@ -980,10 +1029,11 @@ def get_stats() -> dict[str, Any]:
         ).fetchall()
         count_by_type: dict[str, int] = {row["doc_type"]: row["cnt"] for row in type_rows}
 
-        # Count by month (YYYY-MM from created_at)
+        # Count by month: prefer the document date, fall back to ingestion date.
         month_rows = conn.execute(
             """
-            SELECT SUBSTR(created_at, 1, 7) AS month, COUNT(*) AS cnt
+            SELECT SUBSTR(COALESCE(NULLIF(doc_date, ''), created_at), 1, 7) AS month,
+                   COUNT(*) AS cnt
             FROM documents
             WHERE status != 'segmented'
             GROUP BY month
@@ -1006,9 +1056,10 @@ def get_stats() -> dict[str, Any]:
             WHERE date_expiration IS NOT NULL
               AND date_expiration >= ?
               AND date_expiration <= ?
+              AND doc_type IN ({','.join('?' for _ in EXPIRABLE_TYPES)})
               AND status = 'ready';
             """,
-            (today, in_30_days),
+            (today, in_30_days, *sorted(EXPIRABLE_TYPES)),
         ).fetchone()["cnt"]
 
         status_rows = conn.execute(
@@ -1016,15 +1067,19 @@ def get_stats() -> dict[str, Any]:
         ).fetchall()
         by_status = {row["status"] or "unknown": row["cnt"] for row in status_rows}
 
-        # Overdue: documents with date_expiration before today
+        # Overdue: only documents that actually expire (identity, health...)
+        # and only recently expired ones (an archived 2020 document is not
+        # "late").  Very old expiries are silently ignored.
         overdue = conn.execute(
-            """
+            f"""
             SELECT COUNT(*) AS cnt FROM documents
             WHERE date_expiration IS NOT NULL
               AND date_expiration < ?
+              AND date_expiration >= ?
+              AND doc_type IN ({','.join('?' for _ in EXPIRABLE_TYPES)})
               AND status = 'ready';
             """,
-            (today,),
+            (today, _alert_floor(), *sorted(EXPIRABLE_TYPES)),
         ).fetchone()["cnt"]
 
     return {
@@ -1099,18 +1154,21 @@ def get_expiring_documents(days_ahead: int = 90, limit: int = 50) -> list[dict]:
     cutoff = (
         datetime.now(timezone.utc) + timedelta(days=days_ahead)
     ).strftime("%Y-%m-%d")
+    floor = _alert_floor()
 
     with _get_connection() as conn:
         rows = conn.execute(
-            """
+            f"""
             SELECT * FROM documents
             WHERE date_expiration IS NOT NULL
               AND date_expiration <= ?
+              AND date_expiration >= ?
+              AND doc_type IN ({','.join('?' for _ in EXPIRABLE_TYPES)})
               AND status = 'ready'
             ORDER BY date_expiration ASC
             LIMIT ?;
             """,
-            (cutoff, limit),
+            (cutoff, floor, *sorted(EXPIRABLE_TYPES), limit),
         ).fetchall()
     return [_row_to_dict(row) for row in rows]
 
@@ -1124,6 +1182,7 @@ def get_upcoming_echeances(days_ahead: int = 90, limit: int = 50) -> list[dict]:
     cutoff = (
         datetime.now(timezone.utc) + timedelta(days=days_ahead)
     ).strftime("%Y-%m-%d")
+    floor = _alert_floor()
 
     with _get_connection() as conn:
         rows = conn.execute(
@@ -1131,11 +1190,12 @@ def get_upcoming_echeances(days_ahead: int = 90, limit: int = 50) -> list[dict]:
             SELECT * FROM documents
             WHERE date_echeance IS NOT NULL
               AND date_echeance <= ?
+              AND date_echeance >= ?
               AND status = 'ready'
             ORDER BY date_echeance ASC
             LIMIT ?;
             """,
-            (cutoff, limit),
+            (cutoff, floor, limit),
         ).fetchall()
     return [_row_to_dict(row) for row in rows]
 

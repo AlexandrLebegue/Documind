@@ -1,23 +1,23 @@
 """All LLM system prompts for DocuMind."""
 
-VALID_DOC_TYPES = [
-    "facture",
-    "fiche_de_paie",
-    "avis_imposition",
-    "contrat",
-    "attestation",
-    "courrier",
-    "releve_bancaire",
-    "quittance",
-    "identite",
-    "autre",
-]
+from classification import VALID_DOC_TYPES
 
 METADATA_EXTRACTION_PROMPT = """Tu es un assistant spécialisé dans l'analyse de documents administratifs français.
 Analyse le contenu suivant (texte extrait par OCR et/ou images du document) et extrais les métadonnées en JSON strict.
 Champs à extraire :
 - "titre": un titre court et descriptif pour le document (ex: "Facture EDF Janvier 2024", "Fiche de paie Mars 2024")
-- "type": type de document (facture, fiche_de_paie, avis_imposition, contrat, attestation, courrier, releve_bancaire, quittance, identite, autre)
+- "type": type de document, UNIQUEMENT parmi : facture, fiche_de_paie, avis_imposition, contrat, attestation, courrier, banque, quittance, identite, scolarite, sante, logement, emploi, administratif, autre
+  Règles de typage :
+  * fiche_de_paie : tout bulletin de paie / bulletin de salaire / fiche de paie.
+  * banque : RIB, relevé d'identité bancaire, relevé de compte, relevé bancaire.
+  * identite : UNIQUEMENT carte nationale d'identité, passeport, titre de séjour, permis de conduire.
+  * scolarite : certificat de scolarité, diplôme, baccalauréat, relevé de notes, certification (Voltaire...).
+  * sante : comptes-rendus médicaux, carte Vitale, attestation CPAM/mutuelle, prise en charge, ordonnance.
+  * logement : bail, contrat de location, état des lieux, caution, dépôt de garantie.
+  * emploi : contrat de travail, avenant au contrat, CDI/CDD, France Travail.
+  * administratif : recensement, JDC, acte d'état civil, formulaire d'immigration, courrier préfectoral hors pièce d'identité.
+  * contrat : autres contrats (assurance, prestation...) qui ne relèvent pas du logement ni de l'emploi.
+  Ne mets JAMAIS un bulletin de paie, un RIB, un diplôme ou une attestation médicale dans "autre" ou "identite".
 - "emetteur": nom de l'organisme ou entreprise émettrice
 - "date": date du document au format YYYY-MM-DD
 - "montant": montant principal en euros (null si pas applicable)
@@ -77,9 +77,14 @@ Les types de documents valides sont UNIQUEMENT les suivants :
 - contrat : Contrat (bail, travail, assurance, etc.)
 - attestation : Attestation (employeur, domicile, assurance, etc.)
 - courrier : Courrier administratif
-- releve_bancaire : Relevé bancaire
+- banque : RIB ou relevé bancaire
 - quittance : Quittance (loyer, etc.)
-- identite : Pièce d'identité (CNI, passeport, titre de séjour)
+- identite : Pièce d'identité (CNI, passeport, titre de séjour, permis)
+- scolarite : Certificat de scolarité, diplôme, relevé de notes
+- sante : Document médical, carte Vitale, attestation CPAM/mutuelle
+- logement : Bail, état des lieux, caution
+- emploi : Contrat de travail, avenant
+- administratif : Recensement, JDC, acte d'état civil, formulaire
 - autre : Autre document
 
 Réponds UNIQUEMENT avec un objet JSON strict contenant :
@@ -152,7 +157,7 @@ Règles de découpage :
 - Chaque page doit apparaître dans exactement un segment, dans l'ordre, sans trou ni chevauchement.
 - Les numéros de page sont en base 1.
 
-Types valides : facture, fiche_de_paie, avis_imposition, contrat, attestation, courrier, releve_bancaire, quittance, identite, autre.
+Types valides : facture, fiche_de_paie, avis_imposition, contrat, attestation, courrier, banque, quittance, identite, scolarite, sante, logement, emploi, administratif, autre.
 
 Exemples :
 - Un seul document :

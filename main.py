@@ -1,5 +1,6 @@
 """DocuMind — FastAPI application entry point."""
 
+import hashlib
 import mimetypes
 import uuid
 import json
@@ -43,6 +44,9 @@ from database import (
     dismiss_alert as db_dismiss_alert, undismiss_alert as db_undismiss_alert,
     get_dismissed_alert_keys,
     get_child_documents,
+    find_document_by_hash,
+    update_document_hash,
+    list_root_documents_for_dedupe,
 )
 from models import (
     DocumentResponse, DocumentListResponse, DocumentUpdateRequest,
@@ -444,9 +448,27 @@ async def upload_document(
             f"maximum allowed size ({MAX_UPLOAD_SIZE_MB} MB).",
         )
 
+    safe_filename = file.filename or "document"
+
+    # Deduplicate by content hash: re-uploading the same file must not
+    # create another row (and another expensive OCR/LLM pass).
+    file_hash = hashlib.sha256(content).hexdigest()
+    existing = find_document_by_hash(file_hash)
+    if existing is not None:
+        logger.info(
+            "Duplicate upload ignored (%s) — existing document %s",
+            safe_filename,
+            existing["id"][:8],
+        )
+        return UploadResponse(
+            id=existing["id"],
+            filename=existing["filename"],
+            status=existing["status"],
+            message="Doublon détecté : ce document existe déjà",
+        )
+
     # Generate document ID and save file
     doc_id = str(uuid.uuid4())
-    safe_filename = file.filename or "document"
     file_path = os.path.join(ORIGINALS_DIR, f"{doc_id}_{safe_filename}")
 
     with open(file_path, "wb") as f:
@@ -456,6 +478,7 @@ async def upload_document(
 
     # Insert database record
     insert_document(doc_id, safe_filename, file_path)
+    update_document_hash(doc_id, file_hash)
 
     # Verify LLM and embedding model availability
     if app.state.llm is None or app.state.embedding_model is None:
@@ -475,6 +498,92 @@ async def upload_document(
         status="queued",
         message="Document ajouté à la file de traitement",
     )
+
+
+@app.post(
+    "/api/documents/dedupe",
+    summary="Remove duplicate uploads",
+    description="Group root documents by SHA-256 and delete every duplicate, "
+    "keeping the oldest copy. Existing rows without a hash are backfilled.",
+)
+async def dedupe_documents(
+    dry_run: bool = Query(False, description="Report duplicates without deleting"),
+) -> JSONResponse:
+    """Delete documents whose original file content is identical."""
+    roots = list_root_documents_for_dedupe()
+    groups: dict[str, list[dict]] = {}
+    hashed = 0
+
+    for row in roots:
+        file_hash = row.get("file_hash")
+        if not file_hash:
+            path = row.get("filepath") or ""
+            try:
+                if path and os.path.exists(path):
+                    with open(path, "rb") as fh:
+                        file_hash = hashlib.sha256(fh.read()).hexdigest()
+                    if not dry_run:
+                        update_document_hash(row["id"], file_hash)
+                    hashed += 1
+            except OSError:
+                logger.debug("Cannot hash %s", path, exc_info=True)
+                continue
+        if file_hash:
+            groups.setdefault(file_hash, []).append(row)
+
+    duplicates = {h: docs for h, docs in groups.items() if len(docs) > 1}
+    removed: list[dict] = []
+    for file_hash, docs in duplicates.items():
+        keep = docs[0]
+        for dup in docs[1:]:
+            removed.append({
+                "id": dup["id"],
+                "filename": dup["filename"],
+                "kept_id": keep["id"],
+                "kept_filename": keep["filename"],
+            })
+            if dry_run:
+                continue
+            for child in get_child_documents(dup["id"]):
+                delete_document(child["id"])
+            delete_document(dup["id"])
+            logger.info(
+                "Dedupe: removed %s (duplicate of %s)", dup["id"][:8], keep["id"][:8]
+            )
+
+    if not dry_run and removed and app.state.embeddings_cache is not None:
+        app.state.embeddings_cache = refresh_embeddings_cache(app.state.embeddings_cache)
+
+    return JSONResponse(content={
+        "dry_run": dry_run,
+        "scanned": len(roots),
+        "hashes_backfilled": hashed,
+        "duplicate_groups": len(duplicates),
+        "removed_count": len(removed),
+        "removed": removed,
+    })
+
+
+@app.post(
+    "/api/documents/reprocess-all",
+    summary="Reprocess every document",
+    description="Queue a metadata-only reprocess for every root document "
+    "(OCR is served from the page cache).",
+)
+async def reprocess_all_documents() -> JSONResponse:
+    """Enqueue reprocessing for all root documents."""
+    if app.state.llm is None or app.state.embedding_model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="LLM or embedding model not loaded. Cannot reprocess.",
+        )
+    roots = list_root_documents_for_dedupe()
+    queued = 0
+    for row in roots:
+        await _enqueue_reprocess(row["id"], row["filename"], app)
+        queued += 1
+    logger.info("Bulk reprocess queued for %d root document(s)", queued)
+    return JSONResponse(content={"message": "Reprocessing queued", "queued": queued})
 
 
 # ── Document CRUD ──────────────────────────────────────────────────────────

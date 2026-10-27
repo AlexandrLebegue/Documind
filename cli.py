@@ -352,6 +352,16 @@ def cmd_stats(args) -> int:
 
 
 def cmd_reprocess(args) -> int:
+    if getattr(args, "all", False):
+        data = _post("/api/documents/reprocess-all", timeout=120)
+        if args.human:
+            print(f"retraitement en file pour {data.get('queued', 0)} document(s)")
+        else:
+            _print_json(data)
+        return 0
+    if not args.doc_id:
+        print("documind: indiquez un doc_id ou --all", file=sys.stderr)
+        return 2
     data = _post(f"/api/documents/{args.doc_id}/reprocess", timeout=120)
     if args.wait:
         doc = wait_for_document(args.doc_id)
@@ -360,6 +370,20 @@ def cmd_reprocess(args) -> int:
         print(f"retraitement lancé pour {args.doc_id[:8]}")
         if args.wait:
             _human_doc(data["document"])
+    else:
+        _print_json(data)
+    return 0
+
+
+def cmd_dedupe(args) -> int:
+    suffix = "?dry_run=true" if args.dry_run else ""
+    data = _post(f"/api/documents/dedupe{suffix}", timeout=600)
+    if args.human:
+        print(f"scannés: {data.get('scanned', 0)}")
+        print(f"groupes de doublons: {data.get('duplicate_groups', 0)}")
+        print(f"supprimés: {data.get('removed_count', 0)}")
+        for item in data.get("removed", []):
+            print(f"  - {item.get('filename')} ({item.get('id', '')[:8]})")
     else:
         _print_json(data)
     return 0
@@ -639,9 +663,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_stats)
 
     p = sub.add_parser("reprocess", help="Relancer le pipeline d'un document")
-    p.add_argument("doc_id")
+    p.add_argument("doc_id", nargs="?")
+    p.add_argument("--all", action="store_true", help="Retraiter toute la base")
     p.add_argument("--wait", action="store_true")
     p.set_defaults(func=cmd_reprocess)
+
+    p = sub.add_parser("dedupe", help="Supprimer les doublons (SHA-256)")
+    p.add_argument("--dry-run", action="store_true", help="Simuler sans supprimer")
+    p.set_defaults(func=cmd_dedupe)
 
     p = sub.add_parser("delete", help="Supprimer un document")
     p.add_argument("doc_id")

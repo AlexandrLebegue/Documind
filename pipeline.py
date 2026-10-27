@@ -112,12 +112,12 @@ def _process_segment(
             pages_total=len(pages),
             ocr_backend=ocr_backend,
         )
-        metadata = extract_metadata(llm, text)
-        if segment_title and (
-            not metadata.get("titre")
-            or metadata.get("titre") in ("Document sans titre", "Document non classifié")
-        ):
-            metadata["titre"] = segment_title
+        metadata = extract_metadata(
+            llm,
+            text,
+            filename=Path(file_path).name,
+            preferred_title=segment_title,
+        )
         _save_metadata(doc_id, metadata)
         update_document_fields(
             doc_id,
@@ -313,7 +313,7 @@ def reprocess_document(
             page_start=start,
             llm=llm,
             embedding_model=embedding_model,
-            ocr_backend=ocr_label,
+            ocr_backend=doc.get("ocr_backend") or OCR_BACKEND,
         )
         return
 

@@ -8,6 +8,7 @@ from typing import Optional
 import httpx
 
 import config as _cfg
+from classification import finalize_metadata, normalize_doc_type
 from prompts import (
     METADATA_EXTRACTION_PROMPT,
     METADATA_CORRECTION_PROMPT,
@@ -303,7 +304,12 @@ def _extract_json(response_text: str, opener: str = "{"):
     return None
 
 
-def _parse_and_validate_metadata(response_text: str) -> Optional[dict]:
+def _parse_and_validate_metadata(
+    response_text: str,
+    source_text: str = "",
+    filename: str | None = None,
+    preferred_title: str | None = None,
+) -> Optional[dict]:
     """Parse LLM output into a validated metadata dictionary.
 
     Attempts to extract a JSON object from *response_text* even when the
@@ -342,12 +348,15 @@ def _parse_and_validate_metadata(response_text: str) -> Optional[dict]:
     if not parsed.get("titre") or not isinstance(parsed["titre"], str):
         parsed["titre"] = "Document sans titre"
 
-    # type: must be in VALID_DOC_TYPES
-    if parsed["type"] not in VALID_DOC_TYPES:
-        logger.debug(
-            "Unknown doc type '%s' — normalising to 'autre'", parsed["type"],
-        )
-        parsed["type"] = "autre"
+    # type: alias/keyword normalisation (never silently fall back to autre)
+    parsed["type"] = normalize_doc_type(
+        parsed.get("type"),
+        title=str(parsed.get("titre") or preferred_title or ""),
+        emetteur=str(parsed.get("emetteur") or ""),
+        resume=str(parsed.get("resume") or ""),
+        tags=parsed.get("tags") if isinstance(parsed.get("tags"), list) else None,
+        text=source_text,
+    )
 
     # tags: ensure list of strings
     if not isinstance(parsed["tags"], list):
@@ -382,7 +391,12 @@ def _parse_and_validate_metadata(response_text: str) -> Optional[dict]:
         else:
             parsed[date_key] = None
 
-    return parsed
+    return finalize_metadata(
+        parsed,
+        text=source_text,
+        filename=filename,
+        preferred_title=preferred_title,
+    )
 
 
 def _chunk_text(text: str, max_chars: int) -> list[str]:
@@ -461,7 +475,13 @@ def _fallback_metadata() -> dict:
     }
 
 
-def _metadata_for_chunk(client, chunk: str, index: int, total: int) -> dict | None:
+def _metadata_for_chunk(
+    client,
+    chunk: str,
+    index: int,
+    total: int,
+    filename: str | None = None,
+) -> dict | None:
     """Extract metadata from one chunk of a long document (map step)."""
     user_message = (
         f"{OCR_TEXT_ONLY_NOTE}\n\n"
@@ -475,13 +495,18 @@ def _metadata_for_chunk(client, chunk: str, index: int, total: int) -> dict | No
             system_prompt=METADATA_EXTRACTION_PROMPT,
             user_message=user_message,
         )
-        return _parse_and_validate_metadata(raw)
+        return _parse_and_validate_metadata(raw, source_text=chunk, filename=filename)
     except Exception:
         logger.exception("Map metadata extraction failed for chunk %d/%d", index, total)
         return None
 
 
-def _extract_metadata_map_reduce(client, ocr_text: str) -> dict:
+def _extract_metadata_map_reduce(
+    client,
+    ocr_text: str,
+    filename: str | None = None,
+    preferred_title: str | None = None,
+) -> dict:
     """Map-reduce metadata extraction for documents above the context budget."""
     chunks = _chunk_text(ocr_text, _cfg.LLM_MAP_CHUNK_CHARS)
     logger.info(
@@ -492,10 +517,15 @@ def _extract_metadata_map_reduce(client, ocr_text: str) -> dict:
     partials = [
         metadata
         for i, chunk in enumerate(chunks, 1)
-        if (metadata := _metadata_for_chunk(client, chunk, i, len(chunks))) is not None
+        if (metadata := _metadata_for_chunk(client, chunk, i, len(chunks), filename)) is not None
     ]
     if not partials:
-        return _fallback_metadata()
+        return finalize_metadata(
+            _fallback_metadata(),
+            text=ocr_text,
+            filename=filename,
+            preferred_title=preferred_title,
+        )
 
     # Reduce step: let the LLM merge the partial metadata.
     try:
@@ -504,20 +534,32 @@ def _extract_metadata_map_reduce(client, ocr_text: str) -> dict:
             system_prompt=METADATA_MERGE_PROMPT,
             user_message=json.dumps(partials, ensure_ascii=False),
         )
-        merged = _parse_and_validate_metadata(raw)
+        merged = _parse_and_validate_metadata(
+            raw,
+            source_text=ocr_text,
+            filename=filename,
+            preferred_title=preferred_title,
+        )
         if merged is not None:
             return merged
     except Exception:
         logger.exception("Reduce metadata extraction failed")
 
     logger.warning("LLM merge failed — using heuristic metadata merge")
-    return _merge_partial_metadata(partials)
+    return finalize_metadata(
+        _merge_partial_metadata(partials),
+        text=ocr_text,
+        filename=filename,
+        preferred_title=preferred_title,
+    )
 
 
 def extract_metadata(
     client: httpx.Client,
     ocr_text: str,
     images: list[str] | None = None,
+    filename: str | None = None,
+    preferred_title: str | None = None,
 ) -> dict:
     """Extract structured metadata from OCR text (text-only MiniCPM).
 
@@ -534,11 +576,24 @@ def extract_metadata(
     Returns:
         Dictionary with the document metadata fields.
     """
+    def _fallback() -> dict:
+        return finalize_metadata(
+            _fallback_metadata(),
+            text=ocr_text,
+            filename=filename,
+            preferred_title=preferred_title,
+        )
+
     if not ocr_text or not ocr_text.strip():
-        return _fallback_metadata()
+        return _fallback()
 
     if len(ocr_text) > _cfg.LLM_MAP_CHUNK_CHARS:
-        return _extract_metadata_map_reduce(client, ocr_text)
+        return _extract_metadata_map_reduce(
+            client,
+            ocr_text,
+            filename=filename,
+            preferred_title=preferred_title,
+        )
 
     truncated_text = ocr_text[:_MAX_OCR_CHARS]
     user_message = f"{OCR_TEXT_ONLY_NOTE}\n\n{truncated_text}"
@@ -551,7 +606,12 @@ def extract_metadata(
             user_message=user_message,
             images=images,
         )
-        metadata = _parse_and_validate_metadata(raw_response)
+        metadata = _parse_and_validate_metadata(
+            raw_response,
+            source_text=truncated_text,
+            filename=filename,
+            preferred_title=preferred_title,
+        )
     except Exception:
         logger.exception("LLM call failed during metadata extraction (attempt 1)")
         metadata = None
@@ -573,7 +633,12 @@ def extract_metadata(
             system_prompt=METADATA_EXTRACTION_PROMPT,
             user_message=correction_user_msg,
         )
-        metadata = _parse_and_validate_metadata(raw_response)
+        metadata = _parse_and_validate_metadata(
+            raw_response,
+            source_text=truncated_text,
+            filename=filename,
+            preferred_title=preferred_title,
+        )
     except Exception:
         logger.exception("LLM call failed during metadata extraction (attempt 2)")
         metadata = None
@@ -583,7 +648,7 @@ def extract_metadata(
         return metadata
 
     logger.error("Both metadata extraction attempts failed — returning default metadata")
-    return _fallback_metadata()
+    return _fallback()
 
 
 # ---------------------------------------------------------------------------
