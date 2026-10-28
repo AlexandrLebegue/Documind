@@ -165,3 +165,23 @@ String urgencyLabel(String urgency) => switch (urgency) {
   'warning' => 'Bientôt',
   _ => 'À surveiller',
 };
+
+String formatTime(DateTime? date) {
+  if (date == null) return '';
+  return DateFormat('HH:mm', 'fr_FR').format(date.toLocal());
+}
+
+String formatRelativeDate(DateTime? date) {
+  if (date == null) return '—';
+  final local = date.toLocal();
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final day = DateTime(local.year, local.month, local.day);
+  final diff = today.difference(day).inDays;
+  if (diff == 0) {
+    return 'Aujourd’hui à ${DateFormat('HH:mm', 'fr_FR').format(local)}';
+  }
+  if (diff == 1) return 'Hier';
+  if (diff < 7) return 'Il y a $diff jours';
+  return DateFormat('d MMM y', 'fr_FR').format(local);
+}

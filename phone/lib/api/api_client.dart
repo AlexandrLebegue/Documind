@@ -418,10 +418,12 @@ class ApiClient {
       throw _translate(error);
     }
 
-    final stream = response.data!.stream;
+    final stream = response.data!.stream.cast<List<int>>().transform(
+      const Utf8Decoder(allowMalformed: true),
+    );
     final buffer = StringBuffer();
-    await for (final chunk in stream) {
-      buffer.write(utf8.decode(chunk, allowMalformed: true));
+    await for (final text in stream) {
+      buffer.write(text);
       var content = buffer.toString();
       var index = content.indexOf('\n');
       while (index >= 0) {
@@ -496,19 +498,41 @@ class ApiClient {
   Future<Procedure> createProcedure({
     required String procedureType,
     String? name,
-    String? description,
     List<String> manualDocuments = const [],
     String? remarks,
+    String? imageBase64,
   }) async {
     final json = await _post<Map<String, dynamic>>(
       '/procedures',
       data: {
         'procedure_type': procedureType,
         'name': name,
-        'description': description,
         'manual_documents': manualDocuments,
         'remarks': remarks,
+        if (imageBase64 != null) 'image_base64': imageBase64,
       },
+    );
+    return Procedure.fromJson(json);
+  }
+
+  Future<Procedure> updateProcedure(
+    String id, {
+    String? name,
+    String? procedureType,
+    String? description,
+    List<Map<String, String>>? requiredDocuments,
+    String? remarks,
+  }) async {
+    final data = <String, dynamic>{
+      if (name != null) 'name': name,
+      if (procedureType != null) 'procedure_type': procedureType,
+      if (description != null) 'description': description,
+      if (requiredDocuments != null) 'required_documents': requiredDocuments,
+      if (remarks != null) 'remarks': remarks,
+    };
+    final json = await _put<Map<String, dynamic>>(
+      '/procedures/$id',
+      data: data,
     );
     return Procedure.fromJson(json);
   }
@@ -597,27 +621,30 @@ class ApiClient {
     }
     final lines = StreamController<String>();
     final buffer = StringBuffer();
-    response.data!.stream.listen(
-      (chunk) {
-        buffer.write(utf8.decode(chunk, allowMalformed: true));
-        var content = buffer.toString();
-        var index = content.indexOf('\n');
-        while (index >= 0) {
-          final line = content.substring(0, index).trimRight();
-          content = content.substring(index + 1);
-          index = content.indexOf('\n');
-          if (line.startsWith('data:')) {
-            lines.add(line.substring(5).trimLeft());
-          }
-        }
-        buffer
-          ..clear()
-          ..write(content);
-      },
-      onError: lines.addError,
-      onDone: lines.close,
-      cancelOnError: true,
-    );
+    response.data!.stream
+        .cast<List<int>>()
+        .transform(const Utf8Decoder(allowMalformed: true))
+        .listen(
+          (text) {
+            buffer.write(text);
+            var content = buffer.toString();
+            var index = content.indexOf('\n');
+            while (index >= 0) {
+              final line = content.substring(0, index).trimRight();
+              content = content.substring(index + 1);
+              index = content.indexOf('\n');
+              if (line.startsWith('data:')) {
+                lines.add(line.substring(5).trimLeft());
+              }
+            }
+            buffer
+              ..clear()
+              ..write(content);
+          },
+          onError: lines.addError,
+          onDone: lines.close,
+          cancelOnError: true,
+        );
     yield* lines.stream;
   }
 

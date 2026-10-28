@@ -1,0 +1,78 @@
+name: Mobile
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*-mobile"]
+    paths:
+      - "phone/**"
+      - ".github/workflows/mobile.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: phone
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.35.1"
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Checksums
+        run: |
+          mv build/app/outputs/flutter-apk/app-release.apk \
+             build/app/outputs/flutter-apk/documind-mobile-0.1.0.apk
+          cd build/app/outputs/flutter-apk
+          sha256sum documind-mobile-0.1.0.apk > documind-mobile-0.1.0.apk.sha256
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: documind-mobile-apk
+          if-no-files-found: error
+          path: |
+            phone/build/app/outputs/flutter-apk/documind-mobile-0.1.0.apk
+            phone/build/app/outputs/flutter-apk/documind-mobile-0.1.0.apk.sha256
+
+      - name: Publish mobile release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: DocuMind Mobile ${{ github.ref_name }}
+          body: |
+            Client mobile DocuMind (Flutter, Android).
+
+            - APK universel signé avec la clé de debug Flutter (installation manuelle).
+            - Nécessite un serveur DocuMind accessible sur le réseau local.
+            - Vérifier l'empreinte avec le fichier `.sha256` joint.
+          files: |
+            phone/build/app/outputs/flutter-apk/documind-mobile-0.1.0.apk
+            phone/build/app/outputs/flutter-apk/documind-mobile-0.1.0.apk.sha256
+          fail_on_unmatched_files: true

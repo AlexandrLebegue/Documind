@@ -14,8 +14,19 @@ class AppState extends ChangeNotifier {
   bool busy = false;
   ApiClient? _client;
 
+  AppState();
+
   ApiClient? get api => _client;
   bool get hasClient => _client != null;
+
+  factory AppState.withClient(ApiClient client) {
+    final state = AppState();
+    state
+      .._client = client
+      ..server = client.server
+      ..phase = AppPhase.ready;
+    return state;
+  }
 
   Future<void> initialize() async {
     final prefs = await SharedPreferences.getInstance();

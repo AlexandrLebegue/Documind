@@ -4,6 +4,7 @@ import 'package:cunning_document_scanner/cunning_document_scanner.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -82,28 +83,19 @@ Future<void> startScannerFlow(BuildContext context) async {
 Future<File> buildPdfFromPages(
   List<String> paths, {
   ValueChanged<double>? onProgress,
+  Directory? outputDirectory,
 }) async {
-  final directory = await getTemporaryDirectory();
+  final directory = outputDirectory ?? await getTemporaryDirectory();
   final output = Directory('${directory.path}/documind_phone');
   if (!await output.exists()) await output.create(recursive: true);
   final stamp = DateTime.now().millisecondsSinceEpoch;
 
   final document = pw.Document();
   for (var i = 0; i < paths.length; i++) {
-    File? pageFile;
-    if (kIsWeb) {
-      pageFile = File(paths[i]);
-    } else {
-      final compressed = await FlutterImageCompress.compressAndGetFile(
-        paths[i],
-        '${output.path}/page_${stamp}_$i.jpg',
-        quality: 85,
-        minWidth: 2000,
-        minHeight: 2000,
-        format: CompressFormat.jpeg,
-      );
-      if (compressed != null) pageFile = File(compressed.path);
-    }
+    final pageFile = await _preparePage(
+      paths[i],
+      '${output.path}/page_${stamp}_$i.jpg',
+    );
     if (pageFile == null) continue;
     final jpeg = await pageFile.readAsBytes();
     if (jpeg.isEmpty) continue;
@@ -124,6 +116,49 @@ Future<File> buildPdfFromPages(
   final file = File('${output.path}/scan_$stamp.pdf');
   await file.writeAsBytes(await document.save(), flush: true);
   return file;
+}
+
+Future<File?> _preparePage(String source, String target) async {
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    try {
+      final compressed = await FlutterImageCompress.compressAndGetFile(
+        source,
+        target,
+        quality: 85,
+        minWidth: 2000,
+        minHeight: 2000,
+        format: CompressFormat.jpeg,
+      );
+      if (compressed != null) return File(compressed.path);
+    } catch (_) {
+      // Fall through to the portable encoder.
+    }
+  }
+  try {
+    final bytes = await File(source).readAsBytes();
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) return null;
+    final oriented = img.bakeOrientation(decoded);
+    final longest = oriented.width > oriented.height
+        ? oriented.width
+        : oriented.height;
+    final resized = longest > 2000
+        ? img.copyResize(
+            oriented,
+            width: oriented.width >= oriented.height
+                ? 2000
+                : (oriented.width * 2000 / longest).round(),
+            height: oriented.height > oriented.width
+                ? 2000
+                : (oriented.height * 2000 / longest).round(),
+            interpolation: img.Interpolation.average,
+          )
+        : oriented;
+    final jpeg = img.encodeJpg(resized, quality: 85);
+    return File(target)..writeAsBytesSync(jpeg, flush: true);
+  } catch (_) {
+    return null;
+  }
 }
 
 class _ScanReviewSheet extends StatelessWidget {

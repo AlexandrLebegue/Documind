@@ -121,7 +121,7 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
                       ),
                       onSubmitted: (_) => _submit(),
                       decoration: InputDecoration(
-                        hintText: '192.168.1.67:8000',
+                        hintText: '192.168.1.50:8000',
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 24,
                           vertical: 20,
@@ -213,7 +213,7 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
                     ),
                     const SizedBox(height: 24),
                     const Text(
-                      'Exemple : 192.168.1.67:8000 — l’adresse est mémorisée sur ce téléphone.',
+                      'Exemple : 192.168.1.50:8000 — l’adresse est mémorisée sur ce téléphone.',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 12, color: AppColors.faint),
                     ),
@@ -257,7 +257,7 @@ class _ServerSetupScreenState extends State<ServerSetupScreen> {
             SizedBox(height: 12),
             Text(
               'Le téléphone et le serveur DocuMind doivent être sur le même réseau local. '
-              'Saisissez l’adresse affichée par l’installation (par exemple 192.168.1.67:8000). '
+              'Saisissez l’adresse affichée par l’installation (par exemple 192.168.1.50:8000). '
               'Le protocole http:// est ajouté automatiquement.',
               style: TextStyle(
                 fontSize: 14,

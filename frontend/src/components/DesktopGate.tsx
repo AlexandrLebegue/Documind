@@ -88,7 +88,7 @@ function SetupScreen({
             autoFocus
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder="192.168.1.67:8000"
+            placeholder="192.168.1.50:8000"
             spellCheck={false}
             autoCapitalize="none"
             autoCorrect="off"
@@ -109,7 +109,7 @@ function SetupScreen({
           </button>
         </form>
         <p className="mt-6 text-xs text-[#9ca3af]">
-          Exemple : 192.168.1.67:8000 — l&apos;adresse est mémorisée sur cet ordinateur.
+          Exemple : 192.168.1.50:8000 — l&apos;adresse est mémorisée sur cet ordinateur.
         </p>
       </div>
     </div>

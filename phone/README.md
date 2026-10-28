@@ -13,7 +13,20 @@ flutter test
 ```
 
 Le SDK Flutter local (`~/flutter`, stable) suffit pour l'analyse et les tests.
-La construction de l'APK se fait en CI, pas sur le LXC 103.
+La construction de l'APK se fait en CI (`.github/workflows/mobile.yml`), pas sur
+le LXC 103. Un tag `v*-mobile` publie l'APK et son empreinte SHA-256 dans la
+release GitHub.
+
+## Vérification contre un serveur réel
+
+```bash
+dart run tool/api_smoke.dart http://192.168.1.50:8000 /chemin/image-test.png
+```
+
+Le script teste la sonde, les endpoints de lecture, le flux SSE des journaux,
+le chat streaming (la session créée est supprimée) et, si une image est
+fournie, l'upload, l'attente d'OCR puis la suppression. Il ne doit être lancé
+que contre un serveur de test avec une image neutre.
 
 ## Configuration
 

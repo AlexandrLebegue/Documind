@@ -14,9 +14,14 @@ import '../widgets/common.dart';
 import '../widgets/skeleton.dart';
 
 class DocumentDetailScreen extends StatefulWidget {
-  const DocumentDetailScreen({super.key, required this.documentId});
+  const DocumentDetailScreen({
+    super.key,
+    required this.documentId,
+    this.heroTag,
+  });
 
   final String documentId;
+  final String? heroTag;
 
   @override
   State<DocumentDetailScreen> createState() => _DocumentDetailScreenState();
@@ -303,7 +308,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
             ),
             const SizedBox(height: 14),
             Hero(
-              tag: 'document-${doc.id}',
+              tag: widget.heroTag ?? 'document-${doc.id}',
               child: Material(
                 color: Colors.transparent,
                 child: SectionCard(

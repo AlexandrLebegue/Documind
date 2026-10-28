@@ -85,13 +85,7 @@ class _HomeShellState extends State<HomeShell> {
       DocumentsScreen(queryListenable: _documentsQuery),
       const ChatScreen(),
       const AlertsScreen(),
-      _MoreScreen(
-        onNavigate: (index) {
-          if (index == 1) {
-            setState(() => _index = 1);
-          }
-        },
-      ),
+      const _MoreScreen(),
     ];
 
     return Scaffold(
@@ -233,9 +227,7 @@ class _TabTransition extends StatelessWidget {
 }
 
 class _MoreScreen extends StatelessWidget {
-  const _MoreScreen({required this.onNavigate});
-
-  final ValueChanged<int> onNavigate;
+  const _MoreScreen();
 
   @override
   Widget build(BuildContext context) {

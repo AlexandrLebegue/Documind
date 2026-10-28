@@ -309,7 +309,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 delegate: SliverChildBuilderDelegate(
                   (context, index) => CascadeIn(
                     index: index,
-                    child: DocumentCard(document: _documents[index]),
+                    child: DocumentCard(
+                      document: _documents[index],
+                      heroTag: 'documents-${_documents[index].id}',
+                    ),
                   ),
                   childCount: _documents.length,
                 ),
@@ -326,6 +329,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   child: DocumentCard(
                     document: _documents[index],
                     view: DocumentViewMode.list,
+                    heroTag: 'documents-${_documents[index].id}',
                   ),
                 ),
               ),

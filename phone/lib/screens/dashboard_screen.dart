@@ -95,47 +95,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Padding(
-        padding: EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Shimmer(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SkeletonBox(height: 30, width: 190),
-                  SizedBox(height: 8),
-                  SkeletonBox(height: 14, width: 250),
-                  SizedBox(height: 20),
-                  SkeletonBox(height: 52),
-                  SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(child: SkeletonBox(height: 76)),
-                      SizedBox(width: 10),
-                      Expanded(child: SkeletonBox(height: 76)),
-                    ],
-                  ),
-                  SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(child: SkeletonBox(height: 76)),
-                      SizedBox(width: 10),
-                      Expanded(child: SkeletonBox(height: 76)),
-                    ],
-                  ),
-                  SizedBox(height: 22),
-                  SkeletonBox(height: 90),
-                  SizedBox(height: 12),
-                  SkeletonBox(height: 90),
-                  SizedBox(height: 12),
-                  SkeletonBox(height: 90),
-                ],
-              ),
+      return ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const Shimmer(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SkeletonBox(height: 30, width: 190),
+                SizedBox(height: 8),
+                SkeletonBox(height: 14, width: 250),
+                SizedBox(height: 20),
+                SkeletonBox(height: 52),
+                SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(child: SkeletonBox(height: 76)),
+                    SizedBox(width: 10),
+                    Expanded(child: SkeletonBox(height: 76)),
+                  ],
+                ),
+                SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: SkeletonBox(height: 76)),
+                    SizedBox(width: 10),
+                    Expanded(child: SkeletonBox(height: 76)),
+                  ],
+                ),
+                SizedBox(height: 22),
+                SkeletonBox(height: 90),
+                SizedBox(height: 12),
+                SkeletonBox(height: 90),
+                SizedBox(height: 12),
+                SkeletonBox(height: 90),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       );
     }
 
@@ -181,6 +178,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: DocumentCard(
                         document: entry.value,
                         view: DocumentViewMode.list,
+                        heroTag: 'dashboard-${entry.value.id}',
                       ),
                     ),
                   ),
@@ -352,7 +350,7 @@ class _StatsGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       mainAxisSpacing: 10,
       crossAxisSpacing: 10,
-      childAspectRatio: 2.35,
+      childAspectRatio: 2.1,
       children: [
         for (var i = 0; i < cards.length; i++)
           CascadeIn(

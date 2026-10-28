@@ -13,25 +13,28 @@ class DocumentCard extends StatelessWidget {
     super.key,
     required this.document,
     this.view = DocumentViewMode.grid,
+    this.heroTag,
   });
 
   final DocumentModel document;
   final DocumentViewMode view;
+  final String? heroTag;
 
   @override
   Widget build(BuildContext context) {
     final content = view == DocumentViewMode.grid
         ? _GridCard(document: document)
         : _ListCard(document: document);
+    final tag = heroTag ?? 'document-${document.id}';
     return Hero(
-      tag: 'document-${document.id}',
+      tag: tag,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(AppTheme.radius),
           onTap: () => Navigator.of(context).push(
             slideFadeRoute(
-              DocumentDetailScreen(documentId: document.id),
+              DocumentDetailScreen(documentId: document.id, heroTag: tag),
               name: 'document/${document.id}',
             ),
           ),
