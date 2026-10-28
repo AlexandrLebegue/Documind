@@ -129,8 +129,11 @@
 - Corrections issues des tests : tags `Hero` uniques entre onglets (accueil/documents), titres de cartes Réglages flexibles, skeleton d'accueil scrollable, grille de statistiques ajustée à 360 dp.
 - Compression des scans : `flutter_image_compress` sur Android/iOS avec repli portable `image` (JPEG 85 %, côté long ≤ 2000 px) ; assemblage PDF via `pdf`. `image` épinglé à 4.8.0 (`4.11.0` casse avec `archive 4.0.9`).
 - Cleartext Android : `network_security_config.xml` + `usesCleartextTraffic` ; iOS : exception ATS `NSAllowsArbitraryLoads` (serveur LAN HTTP), permissions caméra/photos déclarées dans les deux plateformes.
-- Workflow CI `mobile.yml` : analyze, test et APK release universel à chaque push `phone/`, publication de l'APK sur un tag `v*-mobile`. Construction APK non réalisable sur le LXC 103 (pas de SDK Android).
-- Captures d'écran : à produire via Flutter web + Playwright (ou golden tests) avant livraison finale.
+- Workflow CI `mobile.yml` : analyze, test, APK universel + arm64-v8a/armeabi-v7a/x86_64, contrôle des signatures avec apksigner et SHA256SUMS ; publication sur tag `v*-mobile`. Caches Flutter/pub et Gradle. Aucun build Android local.
+- Reprise : run initial `40677708668` sur `9a7c922` : analyze/tests verts, build encore en cours lors du lancement des corrections.
+- Signature release RSA 3072 : keystore et mots de passe sauvegardés hors git dans `~/documind-brief/android-keystore/` (fichiers chmod 600), quatre secrets GitHub configurés. Repli debug sans secrets pour les builds de validation ; publication tag refusée sans clé release.
+- Animations corrigées : cascade atteignant réellement opacité 1 et translation 0, shimmer sans ticker avec réduction des animations, transition géométrique immédiatement terminée en mode réduit, bottom sheet 240/150 ms ou sans animation.
+- 18 tests verts (dont 3 régressions animations), analyze sans erreur. Captures golden 390×844 sur fixtures synthétiques : 8 écrans, export hors git avec `MOBILE_CAPTURES_DIR=… MOBILE_CAPTURES_FONT=… flutter test test/captures_test.dart --update-goldens`. Aucun document réel dans les captures. Livraison sur LXC 105 et CI signée en cours.
 
 ### Parité écran web -> mobile
 | Écran web | Écran mobile | État |

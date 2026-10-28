@@ -20,7 +20,17 @@ class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
-    )..repeat();
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat();
+    }
   }
 
   @override

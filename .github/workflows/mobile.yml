@@ -21,58 +21,84 @@ jobs:
         working-directory: phone
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.35.1"
           channel: stable
           cache: true
+      - uses: gradle/actions/setup-gradle@v4
 
+      - name: Configure release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            umask 077
+            printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/release.jks
+            printf 'storeFile=release.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+              "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > android/key.properties
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "Release signing secrets required for publishing" >&2
+            exit 1
+          else
+            echo "No signing secrets: using debug key for this validation build"
+          fi
       - name: Install dependencies
         run: flutter pub get
-
       - name: Analyze
         run: flutter analyze
-
       - name: Test
         run: flutter test
-
       - name: Build release APK
         run: flutter build apk --release
-
+      - name: Build release APKs per ABI
+        run: flutter build apk --release --split-per-abi
+      - name: Verify APK signatures
+        run: |
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          for apk in build/app/outputs/flutter-apk/*.apk; do
+            "$signer" verify --verbose --print-certs "$apk"
+          done
       - name: Checksums
         run: |
-          mv build/app/outputs/flutter-apk/app-release.apk \
-             build/app/outputs/flutter-apk/documind-mobile-0.1.0.apk
           cd build/app/outputs/flutter-apk
-          sha256sum documind-mobile-0.1.0.apk > documind-mobile-0.1.0.apk.sha256
-
+          for apk in app*.apk; do
+            mv "$apk" "${apk/app/documind-mobile-0.1.0}"
+          done
+          sha256sum *.apk > SHA256SUMS
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: documind-mobile-apk
           if-no-files-found: error
           path: |
-            phone/build/app/outputs/flutter-apk/documind-mobile-0.1.0.apk
-            phone/build/app/outputs/flutter-apk/documind-mobile-0.1.0.apk.sha256
-
+            phone/build/app/outputs/flutter-apk/*.apk
+            phone/build/app/outputs/flutter-apk/SHA256SUMS
       - name: Publish mobile release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: DocuMind Mobile ${{ github.ref_name }}
           body: |
-            Client mobile DocuMind (Flutter, Android).
+            Client mobile DocuMind 0.1.0 (Flutter, Android).
 
-            - APK universel signé avec la clé de debug Flutter (installation manuelle).
-            - Nécessite un serveur DocuMind accessible sur le réseau local.
-            - Vérifier l'empreinte avec le fichier `.sha256` joint.
+            - APK universel et par architecture signés avec la clé release DocuMind.
+            - Scanner multi-pages, upload et suivi OCR, documents, chat streaming,
+              alertes, démarches, verdicts de synchronisation et réglages.
+            - Serveur DocuMind accessible depuis le téléphone requis.
+            - Vérifier les empreintes avec le fichier SHA256SUMS joint.
+            - iOS préparé ; compilation et validation sur appareil restent à effectuer.
           files: |
-            phone/build/app/outputs/flutter-apk/documind-mobile-0.1.0.apk
-            phone/build/app/outputs/flutter-apk/documind-mobile-0.1.0.apk.sha256
+            phone/build/app/outputs/flutter-apk/*.apk
+            phone/build/app/outputs/flutter-apk/SHA256SUMS
           fail_on_unmatched_files: true
+      - name: Remove signing files
+        if: always()
+        run: rm -f android/key.properties android/app/release.jks

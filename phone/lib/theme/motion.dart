@@ -61,11 +61,13 @@ class CascadeIn extends StatelessWidget {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
       duration: Motion.normal + delay,
-      curve: Motion.curve,
+      curve: Curves.linear,
       builder: (context, value, child) {
-        final adjusted = value == 0
-            ? 0.0
-            : ((value - (delay.inMilliseconds / 1000)).clamp(0.0, 1.0));
+        final start =
+            delay.inMilliseconds / (Motion.normal + delay).inMilliseconds;
+        final adjusted = Motion.curve.transform(
+          ((value - start) / (1 - start)).clamp(0.0, 1.0),
+        );
         return Opacity(
           opacity: adjusted.clamp(0.0, 1.0),
           child: Transform.translate(

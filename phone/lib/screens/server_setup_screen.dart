@@ -292,7 +292,22 @@ class _GeometricTransitionState extends State<GeometricTransition>
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed) widget.onFinished();
     });
-    _controller.forward();
+  }
+
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (Motion.reduced(context)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onFinished();
+      });
+    } else {
+      _controller.forward();
+    }
   }
 
   @override

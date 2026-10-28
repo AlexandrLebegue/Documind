@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
+import '../theme/motion.dart';
 import '../widgets/common.dart';
 import 'analysis_screen.dart';
 import 'scanner_flow.dart';
@@ -15,6 +16,12 @@ import 'scanner_flow.dart';
 Future<bool?> showAddDocumentSheet(BuildContext context) {
   return showModalBottomSheet<bool>(
     context: context,
+    sheetAnimationStyle: Motion.reduced(context)
+        ? AnimationStyle.noAnimation
+        : const AnimationStyle(
+            duration: Motion.normal,
+            reverseDuration: Motion.fast,
+          ),
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: Colors.transparent,
