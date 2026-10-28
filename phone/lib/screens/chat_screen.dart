@@ -19,7 +19,9 @@ import 'document_detail_screen.dart';
 enum _ChatMode { agent, documents }
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  const ChatScreen({super.key, this.onBack});
+
+  final VoidCallback? onBack;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -309,61 +311,37 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _header(),
-        Expanded(
-          child: _loadingHistory
-              ? const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Shimmer(
-                    child: Column(
-                      children: [
-                        SkeletonBox(height: 70),
-                        SizedBox(height: 12),
-                        SkeletonBox(height: 90),
-                        Spacer(),
-                      ],
-                    ),
-                  ),
-                )
-              : _messages.isEmpty
-              ? _emptyState()
-              : _messageList(),
+    return Scaffold(
+      // HomeShell already resizes for the keyboard.
+      resizeToAvoidBottomInset: false,
+      appBar: AppBar(
+        leading: IconButton(
+          tooltip: 'Retour',
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            _focus.unfocus();
+            if (widget.onBack != null) {
+              widget.onBack!();
+            } else {
+              Navigator.of(context).maybePop();
+            }
+          },
         ),
-        if (_liveTools.isNotEmpty) _liveToolsBar(),
-        if (_error != null) _errorBar(),
-        _composer(),
-      ],
-    );
-  }
-
-  Widget _header() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 8, 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Assistant',
-                  style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
-                  ),
-                ),
-                Text(
-                  _mode == _ChatMode.agent
-                      ? 'Agent avec recherche web'
-                      : 'Réponses issues de vos documents',
-                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
-                ),
-              ],
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Assistant'),
+            Text(
+              _mode == _ChatMode.agent
+                  ? 'Agent avec recherche web'
+                  : 'Réponses issues de vos documents',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, color: AppColors.muted),
             ),
-          ),
+          ],
+        ),
+        actions: [
           IconButton(
             tooltip: 'Conversations',
             onPressed: _sending ? null : _openSessions,
@@ -376,6 +354,36 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ],
       ),
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => _focus.unfocus(),
+        child: Column(
+          children: [
+            Expanded(
+              child: _loadingHistory
+                  ? const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Shimmer(
+                        child: Column(
+                          children: [
+                            SkeletonBox(height: 70),
+                            SizedBox(height: 12),
+                            SkeletonBox(height: 90),
+                            Spacer(),
+                          ],
+                        ),
+                      ),
+                    )
+                  : _messages.isEmpty
+                  ? _emptyState()
+                  : _messageList(),
+            ),
+            if (_liveTools.isNotEmpty) _liveToolsBar(),
+            if (_error != null) _errorBar(),
+            _composer(),
+          ],
+        ),
+      ),
     );
   }
 
@@ -386,6 +394,7 @@ class _ChatScreenState extends State<ChatScreen> {
       'Quelles démarches sont en cours ?',
     ];
     return ListView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
       children: [
         const SizedBox(height: 12),
@@ -469,6 +478,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget _messageList() {
     final reversed = _messages.reversed.toList();
     return ListView.builder(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       controller: _scroll,
       reverse: true,
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
@@ -584,6 +594,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   child: TextField(
                     controller: _input,
                     focusNode: _focus,
+                    onTapOutside: (_) => _focus.unfocus(),
                     minLines: 1,
                     maxLines: 5,
                     textCapitalization: TextCapitalization.sentences,

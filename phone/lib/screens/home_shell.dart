@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
+import '../state/transfer_state.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
@@ -16,6 +17,7 @@ import 'logs_screen.dart';
 import 'procedures_screen.dart';
 import 'settings_screen.dart';
 import 'sync_screen.dart';
+import 'transfer_sheet.dart';
 
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key});
@@ -24,8 +26,10 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   int _index = 0;
+  int _previousTab = 0;
+  TransferState? _transfers;
   final ValueNotifier<String> _documentsQuery = ValueNotifier('');
   int _alertCount = 0;
   Timer? _alertTimer;
@@ -33,6 +37,11 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _transfers = context.read<AppState>().transfers;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _transfers?.startPolling();
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _refreshAlertCount());
     _alertTimer = Timer.periodic(
       const Duration(minutes: 2),
@@ -42,9 +51,20 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _transfers?.stopPolling();
     _alertTimer?.cancel();
     _documentsQuery.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _transfers?.startPolling();
+    } else {
+      _transfers?.stopPolling();
+    }
   }
 
   Future<void> _refreshAlertCount() async {
@@ -74,7 +94,11 @@ class _HomeShellState extends State<HomeShell> {
   }
 
   void _onTabChanged(int index) {
-    setState(() => _index = index);
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      if (index == 2 && _index != 2) _previousTab = _index;
+      _index = index;
+    });
     if (index == 3) _refreshAlertCount();
   }
 
@@ -83,7 +107,7 @@ class _HomeShellState extends State<HomeShell> {
     final tabs = [
       DashboardScreen(onSearch: _openDocumentsSearch),
       DocumentsScreen(queryListenable: _documentsQuery),
-      const ChatScreen(),
+      ChatScreen(onBack: () => _onTabChanged(_previousTab)),
       const AlertsScreen(),
       const _MoreScreen(),
     ];
@@ -91,11 +115,46 @@ class _HomeShellState extends State<HomeShell> {
     return Scaffold(
       body: SafeArea(
         bottom: false,
-        child: IndexedStack(
-          index: _index,
+        child: Column(
           children: [
-            for (var i = 0; i < tabs.length; i++)
-              _TabTransition(active: i == _index, child: tabs[i]),
+            if (_transfers != null)
+              AnimatedBuilder(
+                animation: _transfers!,
+                builder: (context, _) {
+                  final transfers = _transfers!;
+                  if (transfers.busyCount == 0 &&
+                      transfers.tasks.isEmpty &&
+                      !transfers.hasErrors) {
+                    return const SizedBox.shrink();
+                  }
+                  return Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      key: const ValueKey('global-transfer-badge'),
+                      onPressed: () => showTransferSheet(context),
+                      icon: Icon(
+                        transfers.hasErrors
+                            ? Icons.error_outline
+                            : Icons.cloud_upload_outlined,
+                      ),
+                      label: Text(
+                        transfers.hasErrors
+                            ? 'Envois · vérifier le suivi'
+                            : 'File d’attente · ${transfers.busyCount} en cours',
+                      ),
+                    ),
+                  );
+                },
+              ),
+            Expanded(
+              child: IndexedStack(
+                index: _index,
+                children: [
+                  for (var i = 0; i < tabs.length; i++)
+                    _TabTransition(active: i == _index, child: tabs[i]),
+                ],
+              ),
+            ),
           ],
         ),
       ),

@@ -30,9 +30,11 @@ class QueueStatus {
     required this.totalPending,
     required this.totalActive,
     this.active,
+    this.history = const [],
   });
 
   final List<QueueJob> pending;
+  final List<QueueJob> history;
   final int totalPending;
   final int totalActive;
   final QueueJob? active;
@@ -43,6 +45,10 @@ class QueueStatus {
     final active = json['active'];
     return QueueStatus(
       pending: (json['pending'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(QueueJob.fromJson)
+          .toList(),
+      history: (json['history'] as List? ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(QueueJob.fromJson)
           .toList(),

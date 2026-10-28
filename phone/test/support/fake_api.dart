@@ -6,6 +6,7 @@ import 'package:documind_phone/models/ingest.dart';
 import 'package:documind_phone/models/procedure.dart';
 import 'package:documind_phone/models/settings.dart';
 import 'package:documind_phone/models/stats.dart';
+import 'package:documind_phone/models/queue.dart';
 
 DocumentModel testDocument({
   String id = 'doc-1',
@@ -49,6 +50,10 @@ class FakeApiClient extends ApiClient {
 
   @override
   Future<List<DocumentModel>> segments(String id) async => const [];
+
+  @override
+  Future<QueueStatus> queue() async =>
+      const QueueStatus(pending: [], totalPending: 0, totalActive: 0);
 
   @override
   Future<Health> health() async => const Health(

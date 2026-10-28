@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/api_client.dart';
+import 'transfer_state.dart';
 
 enum AppPhase { loading, setup, transition, ready }
 
@@ -13,6 +14,19 @@ class AppState extends ChangeNotifier {
   String setupError = '';
   bool busy = false;
   ApiClient? _client;
+  TransferState? transfers;
+
+  void _setClient(ApiClient? client) {
+    transfers?.dispose();
+    _client = client;
+    transfers = client == null ? null : TransferState(client);
+  }
+
+  @override
+  void dispose() {
+    transfers?.dispose();
+    super.dispose();
+  }
 
   AppState();
 
@@ -22,7 +36,7 @@ class AppState extends ChangeNotifier {
   factory AppState.withClient(ApiClient client) {
     final state = AppState();
     state
-      .._client = client
+      .._setClient(client)
       ..server = client.server
       ..phase = AppPhase.ready;
     return state;
@@ -41,7 +55,7 @@ class AppState extends ChangeNotifier {
     final probe = await ApiClient.probe(stored);
     if (probe.ok) {
       server = stored;
-      _client = ApiClient(stored);
+      _setClient(ApiClient(stored));
       phase = AppPhase.transition;
     } else {
       server = stored;
@@ -67,7 +81,7 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(serverStorageKey, normalized);
     server = normalized;
-    _client = ApiClient(normalized);
+    _setClient(ApiClient(normalized));
     phase = AppPhase.transition;
     setupError = '';
     notifyListeners();
@@ -91,7 +105,7 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(serverStorageKey);
     server = '';
-    _client = null;
+    _setClient(null);
     phase = AppPhase.setup;
     setupError = '';
     notifyListeners();

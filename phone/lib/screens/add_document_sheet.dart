@@ -3,18 +3,24 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
+import '../state/transfer_state.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/motion.dart';
 import '../widgets/common.dart';
-import 'analysis_screen.dart';
 import 'scanner_flow.dart';
+import 'transfer_sheet.dart';
 
-Future<bool?> showAddDocumentSheet(BuildContext context) {
-  return showModalBottomSheet<bool>(
+enum _DocumentSource { scanner, file, gallery }
+
+Future<bool?> showAddDocumentSheet(BuildContext context) async {
+  // Only return the choice from the transient sheet. All asynchronous native
+  // work belongs to the caller, which survives the sheet's reverse animation.
+  final source = await showModalBottomSheet<_DocumentSource>(
     context: context,
     sheetAnimationStyle: Motion.reduced(context)
         ? AnimationStyle.noAnimation
@@ -25,8 +31,29 @@ Future<bool?> showAddDocumentSheet(BuildContext context) {
     isScrollControlled: true,
     useSafeArea: true,
     backgroundColor: Colors.transparent,
-    builder: (context) => const AddDocumentSheet(),
+    builder: (_) => const AddDocumentSheet(),
   );
+  if (source == null || !context.mounted) return false;
+  try {
+    switch (source) {
+      case _DocumentSource.scanner:
+        await startScannerFlow(context);
+      case _DocumentSource.file:
+        await _pickFiles(context);
+      case _DocumentSource.gallery:
+        await _pickGallery(context);
+    }
+    return true;
+  } catch (error) {
+    if (context.mounted) {
+      showAppSnack(
+        context,
+        'Import impossible : ${shortErrorMessage(error)}',
+        error: true,
+      );
+    }
+    return false;
+  }
 }
 
 class AddDocumentSheet extends StatelessWidget {
@@ -71,30 +98,21 @@ class AddDocumentSheet extends StatelessWidget {
             subtitle:
                 'Caméra, détection des bords, recadrage et plusieurs pages en un seul PDF.',
             highlighted: true,
-            onTap: () async {
-              Navigator.of(context).pop();
-              await startScannerFlow(context);
-            },
+            onTap: () => Navigator.of(context).pop(_DocumentSource.scanner),
           ),
           const SizedBox(height: 10),
           _SourceTile(
             icon: Icons.upload_file_outlined,
             title: 'Choisir un fichier',
             subtitle: 'PDF, JPG, JPEG, PNG ou TXT (max 50 Mo).',
-            onTap: () async {
-              Navigator.of(context).pop();
-              await _pickFiles(context);
-            },
+            onTap: () => Navigator.of(context).pop(_DocumentSource.file),
           ),
           const SizedBox(height: 10),
           _SourceTile(
             icon: Icons.photo_library_outlined,
             title: 'Depuis la galerie',
             subtitle: 'Sélectionnez une ou plusieurs images à envoyer.',
-            onTap: () async {
-              Navigator.of(context).pop();
-              await _pickGallery(context);
-            },
+            onTap: () => Navigator.of(context).pop(_DocumentSource.gallery),
           ),
           const SizedBox(height: 16),
           const Row(
@@ -113,31 +131,59 @@ class AddDocumentSheet extends StatelessWidget {
       ),
     );
   }
+}
 
-  Future<void> _pickFiles(BuildContext context) async {
-    final result = await FilePicker.pickFiles(
-      allowMultiple: true,
-      type: FileType.custom,
-      allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png', 'txt'],
-    );
-    if (result == null || result.files.isEmpty) return;
-    final paths = result.files
-        .map((file) => file.path)
-        .whereType<String>()
-        .toList();
-    if (paths.isEmpty) return;
-    if (!context.mounted) return;
-    await uploadAndTrack(context, paths.map(File.new).toList());
-  }
+Future<void> _pickFiles(BuildContext context) async {
+  final result = await FilePicker.pickFiles(
+    allowMultiple: true,
+    type: FileType.custom,
+    allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png', 'txt'],
+    withReadStream: true,
+  );
+  if (result == null || result.files.isEmpty || !context.mounted) return;
+  await uploadInputsAndTrack(context, [
+    for (final file in result.files)
+      UploadInput(file.name, () => materializePickedFile(file)),
+  ]);
+}
 
-  Future<void> _pickGallery(BuildContext context) async {
-    final images = await ImagePicker().pickMultiImage(
-      imageQuality: 90,
-      maxWidth: 2400,
-    );
-    if (images.isEmpty || !context.mounted) return;
-    await uploadAndTrack(context, images.map((x) => File(x.path)).toList());
+// Native pickers normally cache a local path. Keep byte/stream fallbacks for
+// providers that return no usable path; never discard a selected file silently.
+Future<File> materializePickedFile(PlatformFile picked) async {
+  final path = picked.path;
+  if (path != null && !path.startsWith('content:')) {
+    final file = path.startsWith('file:')
+        ? File.fromUri(Uri.parse(path))
+        : File(path);
+    if (await file.exists()) return file;
   }
+  if (picked.bytes == null && picked.readStream == null) {
+    throw Exception(
+      'Fichier inaccessible. Copiez-le sur le téléphone puis réessayez.',
+    );
+  }
+  final directory = await getTemporaryDirectory();
+  final imports = await Directory(
+    '${directory.path}/documind_imports',
+  ).create(recursive: true);
+  final cache = await imports.createTemp('upload_');
+  final name = picked.name.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+  final file = File('${cache.path}/$name');
+  if (picked.bytes != null) {
+    await file.writeAsBytes(picked.bytes!, flush: true);
+  } else {
+    await picked.readStream!.pipe(file.openWrite());
+  }
+  return file;
+}
+
+Future<void> _pickGallery(BuildContext context) async {
+  final images = await ImagePicker().pickMultiImage(
+    imageQuality: 90,
+    maxWidth: 2400,
+  );
+  if (images.isEmpty || !context.mounted) return;
+  await uploadAndTrack(context, images.map((x) => File(x.path)).toList());
 }
 
 class _SourceTile extends StatelessWidget {
@@ -224,181 +270,28 @@ class _SourceTile extends StatelessWidget {
   }
 }
 
-/// Uploads a list of files sequentially with a live progress sheet, then
-/// opens the analysis tracker for the first created document.
+/// Starts transfers in application state so closing the tracker never cancels
+/// an upload or loses its retry action.
 Future<void> uploadAndTrack(
   BuildContext context,
   List<File> files, {
   String source = 'phone',
+}) => uploadInputsAndTrack(context, [
+  for (final file in files)
+    UploadInput(file.uri.pathSegments.last, () async => file),
+], source: source);
+
+Future<void> uploadInputsAndTrack(
+  BuildContext context,
+  List<UploadInput> files, {
+  String source = 'phone',
 }) async {
-  final api = context.read<AppState>().api;
-  if (api == null || files.isEmpty) return;
-
-  final progress = ValueNotifier<double>(0);
-  final currentName = ValueNotifier<String>('');
-  final state = ValueNotifier<_UploadPhase>(_UploadPhase.uploading);
-  final uploaded = <String>[];
-  final errors = <String>[];
-
-  showModalBottomSheet<void>(
-    context: context,
-    isDismissible: false,
-    enableDrag: false,
-    backgroundColor: Colors.transparent,
-    builder: (sheetContext) => _UploadProgressSheet(
-      progress: progress,
-      currentName: currentName,
-      state: state,
-      fileCount: files.length,
-    ),
-  );
-
-  for (var i = 0; i < files.length; i++) {
-    final file = files[i];
-    currentName.value = file.path.split(Platform.pathSeparator).last;
-    progress.value = 0;
-    try {
-      final size = await file.length();
-      final result = await api.uploadDocument(
-        file,
-        source: source,
-        onProgress: (sent, total) {
-          if (total > 0) progress.value = (sent / total).clamp(0.0, 1.0);
-        },
-      );
-      uploaded.add(result.id);
-      progress.value = 1;
-      if (size <= 0) {
-        errors.add('${currentName.value} : fichier vide');
-      }
-    } catch (error) {
-      errors.add('${currentName.value} : ${shortErrorMessage(error)}');
-    }
-    if (i < files.length - 1) {
-      await Future<void>.delayed(const Duration(milliseconds: 180));
-    }
+  final app = context.read<AppState>();
+  final transfers = app.transfers;
+  if (transfers == null) {
+    throw Exception('Connectez-vous à un serveur avant l’envoi.');
   }
-
-  if (!context.mounted) return;
-  state.value = _UploadPhase.done;
-  Navigator.of(context, rootNavigator: true).pop();
-
-  if (uploaded.isEmpty) {
-    showAppSnack(
-      context,
-      errors.isEmpty ? 'Aucun fichier envoyé.' : errors.first,
-      error: true,
-    );
-    return;
-  }
-
-  if (errors.isNotEmpty) {
-    showAppSnack(
-      context,
-      '${uploaded.length} envoyé(s), ${errors.length} erreur(s)',
-    );
-  } else {
-    showAppSnack(context, 'Document ajouté à la file de traitement');
-  }
-
-  if (!context.mounted) return;
-  await Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => AnalysisScreen(documentIds: uploaded),
-    ),
-  );
-}
-
-enum _UploadPhase { uploading, done }
-
-class _UploadProgressSheet extends StatelessWidget {
-  const _UploadProgressSheet({
-    required this.progress,
-    required this.currentName,
-    required this.state,
-    required this.fileCount,
-  });
-
-  final ValueNotifier<double> progress;
-  final ValueNotifier<String> currentName;
-  final ValueNotifier<_UploadPhase> state;
-  final int fileCount;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
-      ),
-      padding: const EdgeInsets.fromLTRB(22, 22, 22, 34),
-      child: ValueListenableBuilder<_UploadPhase>(
-        valueListenable: state,
-        builder: (context, phase, _) => Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: AppColors.accentLight,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.cloud_upload_outlined,
-                    color: AppColors.accent,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    phase == _UploadPhase.done
-                        ? 'Envoi terminé'
-                        : 'Envoi vers DocuMind…',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            ValueListenableBuilder<String>(
-              valueListenable: currentName,
-              builder: (context, name, _) => Text(
-                name.isEmpty ? '$fileCount fichier(s)' : name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13, color: AppColors.muted),
-              ),
-            ),
-            const SizedBox(height: 8),
-            ValueListenableBuilder<double>(
-              valueListenable: progress,
-              builder: (context, value, _) => ClipRRect(
-                borderRadius: BorderRadius.circular(99),
-                child: LinearProgressIndicator(
-                  value: value,
-                  minHeight: 7,
-                  backgroundColor: AppColors.beige200,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            ValueListenableBuilder<double>(
-              valueListenable: progress,
-              builder: (context, value, _) => Text(
-                '${(value * 100).round()} %',
-                style: const TextStyle(fontSize: 11, color: AppColors.faint),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  if (files.isEmpty) return;
+  transfers.add(files, source: source);
+  await showTransferSheet(context);
 }

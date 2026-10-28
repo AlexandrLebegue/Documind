@@ -623,7 +623,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [
           const _CardTitle(icon: Icons.info_outline, title: 'Application'),
           const SizedBox(height: 10),
-          _infoRow('Version mobile', '0.1.0'),
+          _infoRow('Version mobile', '0.1.1'),
           _infoRow('Version serveur', _settings?.version ?? '—'),
           _infoRow('Stockage serveur', _settings?.dataDir ?? '—'),
           const SizedBox(height: 6),

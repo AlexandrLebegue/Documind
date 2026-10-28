@@ -70,7 +70,7 @@ jobs:
         run: |
           cd build/app/outputs/flutter-apk
           for apk in app*.apk; do
-            mv "$apk" "${apk/app/documind-mobile-0.1.0}"
+            mv "$apk" "${apk/app/documind-mobile-0.1.1}"
           done
           sha256sum *.apk > SHA256SUMS
       - name: Upload APK artifact
@@ -81,24 +81,6 @@ jobs:
           path: |
             phone/build/app/outputs/flutter-apk/*.apk
             phone/build/app/outputs/flutter-apk/SHA256SUMS
-      - name: Publish mobile release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: DocuMind Mobile ${{ github.ref_name }}
-          body: |
-            Client mobile DocuMind 0.1.0 (Flutter, Android).
-
-            - APK universel et par architecture signés avec la clé release DocuMind.
-            - Scanner multi-pages, upload et suivi OCR, documents, chat streaming,
-              alertes, démarches, verdicts de synchronisation et réglages.
-            - Serveur DocuMind accessible depuis le téléphone requis.
-            - Vérifier les empreintes avec le fichier SHA256SUMS joint.
-            - iOS : IPA non signée (documind-mobile-0.1.0-unsigned.ipa) à signer soi-même (Sideloadly/AltStore avec un Apple ID, expire après 7 jours).
-          files: |
-            phone/build/app/outputs/flutter-apk/*.apk
-            phone/build/app/outputs/flutter-apk/SHA256SUMS
-          fail_on_unmatched_files: true
       - name: Remove signing files
         if: always()
         run: rm -f android/key.properties android/app/release.jks
@@ -125,8 +107,8 @@ jobs:
           rm -rf build/ipa && mkdir -p build/ipa/Payload
           cp -R build/ios/iphoneos/Runner.app build/ipa/Payload/
           cd build/ipa
-          zip -qry documind-mobile-0.1.0-unsigned.ipa Payload
-          shasum -a 256 documind-mobile-0.1.0-unsigned.ipa > SHA256SUMS-ios
+          zip -qry documind-mobile-0.1.1-unsigned.ipa Payload
+          shasum -a 256 documind-mobile-0.1.1-unsigned.ipa > SHA256SUMS-ios
           ls -l
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
@@ -136,11 +118,42 @@ jobs:
           path: |
             phone/build/ipa/*.ipa
             phone/build/ipa/SHA256SUMS-ios
-      - name: Attach IPA to release
-        if: startsWith(github.ref, 'refs/tags/')
+
+  release:
+    name: Publish verified mobile release
+    needs: [android, ios]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: documind-mobile-*
+          merge-multiple: true
+          path: release
+      - name: Verify and combine checksums
+        working-directory: release
+        run: |
+          sha256sum -c SHA256SUMS
+          sha256sum -c SHA256SUMS-ios
+          test "$(find . -name '*.apk' | wc -l)" -eq 4
+          test "$(find . -name '*.ipa' | wc -l)" -eq 1
+          sha256sum *.apk *.ipa > SHA256SUMS
+      - name: Publish mobile release
         uses: softprops/action-gh-release@v2
         with:
+          name: DocuMind Mobile ${{ github.ref_name }}
+          body: |
+            Correctifs DocuMind Mobile 0.1.1 (Android et iPhone).
+
+            - Envoi réparé pour fichier, galerie et scanner : le retour du sélecteur déclenche bien le POST.
+            - Suivi immédiat des octets envoyés, file complète, position, OCR et analyse IA ; erreurs et réessai.
+            - Badge global pour rouvrir le suivi sans interrompre les envois.
+            - Chat : bouton retour en haut, clavier fermé au tap extérieur et au défilement.
+            - Quatre APK signés avec la même clé release DocuMind que la version 0.1.0.
+            - IPA non signée à signer avec Sideloadly/AltStore ; voir docs/IPHONE.md.
+            - SHA256SUMS couvre les quatre APK et l’IPA. Serveur DocuMind accessible requis.
           files: |
-            phone/build/ipa/*.ipa
-            phone/build/ipa/SHA256SUMS-ios
+            release/*.apk
+            release/*.ipa
+            release/SHA256SUMS
           fail_on_unmatched_files: true

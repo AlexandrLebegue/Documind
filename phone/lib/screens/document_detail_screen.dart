@@ -53,7 +53,7 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
     try {
       final doc = await api.document(widget.documentId);
       List<DocumentModel> segments = const [];
-      if (doc.status == 'ready') {
+      if (doc.status == 'ready' || doc.status == 'segmented') {
         try {
           segments = await api.segments(doc.id);
         } catch (_) {}

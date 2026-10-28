@@ -96,9 +96,17 @@ Future<File> buildPdfFromPages(
       paths[i],
       '${output.path}/page_${stamp}_$i.jpg',
     );
-    if (pageFile == null) continue;
+    if (pageFile == null) {
+      throw StateError(
+        'La page ${i + 1} du scan est illisible. Recommencez le scan.',
+      );
+    }
     final jpeg = await pageFile.readAsBytes();
-    if (jpeg.isEmpty) continue;
+    if (jpeg.isEmpty) {
+      throw StateError(
+        'La page ${i + 1} du scan est vide. Recommencez le scan.',
+      );
+    }
     final image = pw.MemoryImage(jpeg);
     document.addPage(
       pw.Page(

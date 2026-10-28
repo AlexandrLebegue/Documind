@@ -26,9 +26,9 @@ ordinateur. Il faut compter environ 20 minutes la première fois.
 ## 1. Télécharger l'application
 
 Ouvrir la page de la
-[release v0.1.0-mobile](https://github.com/AlexandrLebegue/Documind/releases/tag/v0.1.0-mobile)
+[release v0.1.1-mobile](https://github.com/AlexandrLebegue/Documind/releases/tag/v0.1.1-mobile)
 et télécharger, dans la rubrique *Assets*, le fichier
-**`documind-mobile-0.1.0-unsigned.ipa`** (environ 11 Mo).
+**`documind-mobile-0.1.1-unsigned.ipa`** (environ 11 Mo).
 Ne pas l'ouvrir : le garder dans le dossier Téléchargements.
 
 ## 2. Préparer l'ordinateur
@@ -54,7 +54,7 @@ Ne pas l'ouvrir : le garder dans le dossier Téléchargements.
 ## 4. Installer DocuMind avec Sideloadly
 
 1. Ouvrir Sideloadly. L'iPhone doit apparaître dans la liste *iDevice* en haut.
-2. Glisser le fichier `documind-mobile-0.1.0-unsigned.ipa` sur la grande icône
+2. Glisser le fichier `documind-mobile-0.1.1-unsigned.ipa` sur la grande icône
    *IPA* à gauche (ou cliquer dessus pour le sélectionner).
 3. Dans le champ *Apple account*, saisir l'adresse e-mail de l'Apple ID.
 4. Cliquer sur **Start**, puis saisir le mot de passe de l'Apple ID quand il est
