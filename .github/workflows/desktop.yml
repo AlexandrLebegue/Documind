@@ -3,7 +3,7 @@ name: Desktop
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ["v*", "!v*-mobile"]
     paths:
       - "desktop/**"
       - "frontend/**"

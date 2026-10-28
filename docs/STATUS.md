@@ -135,7 +135,7 @@
 - Animations corrigées : cascade atteignant réellement opacité 1 et translation 0, shimmer sans ticker avec réduction des animations, transition géométrique immédiatement terminée en mode réduit, bottom sheet 240/150 ms ou sans animation.
 - 18 tests verts (dont 3 régressions animations), analyze sans erreur ; un test optionnel de captures (exécuté et vert, ignoré en CI sans variable d’export). Neuf captures golden 390×844 sur fixtures synthétiques, contrôlées visuellement : serveur, accueil, documents, chat, alertes, plus, réglages, ajout, fiche. Stockées dans `/opt/documind-data/screens/mobile/` sur LXC 105, hors git. Polices Roboto/MaterialIcons chargées explicitement dans le banc de capture.
 - Export reproductible : depuis `phone/`, définir `MOBILE_CAPTURES_DIR` (répertoire absolu), `MOBILE_CAPTURES_FONT` (Roboto-Regular.ttf du cache Flutter) et `MOBILE_CAPTURES_ICONS` (MaterialIcons-Regular.otf du même cache), puis `flutter test test/captures_test.dart --update-goldens`.
-- Test réel relancé après reprise : probe, API principales, SSE journaux et chat (session supprimée), upload PNG synthétique → statut ready → suppression, succès complet. Aucun document réel exporté. Publication finale en cours.
+- Test réel relancé après reprise : probe, API principales, SSE journaux et chat (session supprimée), upload PNG synthétique → statut ready → suppression, succès complet. Aucun document réel exporté. Release publiée et vérifiée.
 
 ### Parité écran web -> mobile
 | Écran web | Écran mobile | État |
@@ -155,6 +155,18 @@
 | `/settings` réglages | Réglages (`settings_screen.dart`) | Fait |
 
 ### Livraison mobile — validation CI
-- [CI générale finale](https://github.com/AlexandrLebegue/Documind/actions/runs/40678907410) verte sur `0150e2b` ; [Mobile final](https://github.com/AlexandrLebegue/Documind/actions/runs/40678907417) : analyze, tests, quatre builds et vérification des signatures réussis (fermeture du cache en cours au moment du tag).
+- [CI générale finale](https://github.com/AlexandrLebegue/Documind/actions/runs/40678907410) verte sur `0150e2b` ; [Mobile final](https://github.com/AlexandrLebegue/Documind/actions/runs/40678907417) entièrement vert : analyze, tests, quatre builds et vérification des signatures réussis.
 - Certificat release SHA-256 : `3bfa467e4b7bf11efd6f5ea8286f85602e4fbe643e9081c4e427b17033724174`, identique au certificat du keystore privé. Aucune compilation Android locale.
 - Limites : scanner/caméra, partage natif et installation à valider sur téléphone Android réel ; iOS conservé mais non compilé dans ce jalon. Le PDF original s’ouvre dans une application externe ; aperçu intégré réservé aux images.
+
+### Release v0.1.0-mobile publiée
+- **Jalon 4 terminé** : tag `v0.1.0-mobile` sur `d79f322`, [workflow du tag 40679954980 entièrement vert](https://github.com/AlexandrLebegue/Documind/actions/runs/40679954980), [release publique non brouillon](https://github.com/AlexandrLebegue/Documind/releases/tag/v0.1.0-mobile).
+- Quatre APK release et `SHA256SUMS` confirmés `uploaded` via l’API GitHub, téléchargés puis vérifiés (`sha256sum -c SHA256SUMS` : 4 OK). Les quatre certificats vus par apksigner sont identiques à la clé sauvegardée. Notice : [MOBILE.md](MOBILE.md).
+- Correction du filtre Desktop : l’ancien `v*` avait aussi déclenché un packaging PC sur le tag mobile ; trois installateurs PC retirés de cette release, exclusion `!v*-mobile` ajoutée au workflow Desktop. Aucun APK modifié, releases desktop conservées.
+
+| APK publié | Octets | SHA-256 |
+|---|---:|---|
+| `documind-mobile-0.1.0-arm64-v8a-release.apk` | 22109760 | `e87df9c14f70f506b0790e53e87a18cfad97ddc33bb37b49eeef320e05f27b87` |
+| `documind-mobile-0.1.0-armeabi-v7a-release.apk` | 20228566 | `aa16a4a59a5e0c2163d17d63eebbe439d3d1f0a0ab5a2af67e80e0b13933ea68` |
+| `documind-mobile-0.1.0-release.apk` | 60850829 | `9e57c21dd9a00bfe8d0db6af6c66d86a31f45ff10a607b0a6173157373e9d45a` |
+| `documind-mobile-0.1.0-x86_64-release.apk` | 23281855 | `58818276d80630ffc5b23a43d07d237ea2af6ba3b0ffe9463ac9973808b8d4cc` |
