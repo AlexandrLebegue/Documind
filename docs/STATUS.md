@@ -190,8 +190,8 @@
 
 | Fichier publié | Octets | SHA-256 |
 |---|---:|---|
-| `documind-mobile-0.1.1-arm64-v8a-release.apk` | 8272448 | `464364d09e5b6914667343e33ce5154d690f3d6224042b3fa3c5b919efa59c29` |
-| `documind-mobile-0.1.1-armeabi-v7a-release.apk` | 32036 | `5f42b2950054e080c9ec0f4bd9d0b657c1368a033407fc1ed12658bbcd95b004` |
-| `documind-mobile-0.1.1-release.apk` | 7028016 | `babdc222b41a30e7826ca13eb1c2ea05effa9cd790f5a1020fe2fbc0305cee64` |
-| `documind-mobile-0.1.1-x86_64-release.apk` | 9011200 | `c0456610b920736d384cd539e648a69760c18c2df528ca3c412e5b0fd3efb990` |
-| `documind-mobile-0.1.1-unsigned.ipa` | 6752634 | `870cec8450d8116c8e679025d5bfa148f1753f45af0d629cfeba5e1b597dffff` |
+| `documind-mobile-0.1.1-arm64-v8a-release.apk` | 22109696 | `464364d09e5b6914667343e33ce5154d690f3d6224042b3fa3c5b919efa59c29` |
+| `documind-mobile-0.1.1-armeabi-v7a-release.apk` | 20261270 | `5f42b2950054e080c9ec0f4bd9d0b657c1368a033407fc1ed12658bbcd95b004` |
+| `documind-mobile-0.1.1-release.apk` | 60883541 | `babdc222b41a30e7826ca13eb1c2ea05effa9cd790f5a1020fe2fbc0305cee64` |
+| `documind-mobile-0.1.1-x86_64-release.apk` | 23281791 | `c0456610b920736d384cd539e648a69760c18c2df528ca3c412e5b0fd3efb990` |
+| `documind-mobile-0.1.1-unsigned.ipa` | 11137122 | `870cec8450d8116c8e679025d5bfa148f1753f45af0d629cfeba5e1b597dffff` |
