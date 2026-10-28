@@ -9,11 +9,12 @@ import 'package:provider/provider.dart';
 
 import 'support/fake_api.dart';
 
-Widget harness(Widget child, {AppState? state}) {
+Widget harness(Widget child, {AppState? state, ThemeData? theme}) {
   return ChangeNotifierProvider<AppState>.value(
     value: state ?? AppState.withClient(FakeApiClient()),
     child: MaterialApp(
-      theme: AppTheme.light(),
+      debugShowCheckedModeBanner: false,
+      theme: theme ?? AppTheme.light(),
       locale: const Locale('fr', 'FR'),
       supportedLocales: const [Locale('fr', 'FR'), Locale('en')],
       localizationsDelegates: const [

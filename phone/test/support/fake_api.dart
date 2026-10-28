@@ -44,6 +44,13 @@ class FakeApiClient extends ApiClient {
   ];
 
   @override
+  Future<DocumentModel> document(String id) async =>
+      documentsResult.firstWhere((doc) => doc.id == id);
+
+  @override
+  Future<List<DocumentModel>> segments(String id) async => const [];
+
+  @override
   Future<Health> health() async => const Health(
     status: 'ok',
     llmLoaded: true,
