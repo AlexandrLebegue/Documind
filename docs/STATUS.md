@@ -182,3 +182,16 @@
 - Vérification locale finale : `flutter analyze --no-pub` sans aucun diagnostic ; `flutter test --no-pub` : **37 tests réussis**, 1 test de captures optionnel ignoré. Les 19 nouveaux tests couvrent les trois sources (POST différé, erreur, annulation), le suivi/badge/réessai, clavier/retour, URI/bytes/flux, limites de taille et page de scan illisible.
 - Test réel du client Dart sur le serveur : POST multipart de 10 876 octets pour un PNG synthétique unique, `queued` → `processing` OCR 0/1 → 1/1 → `ready`, suppression puis GET 404, compteur de documents 91 → 91. Aucun document réel utilisé ou exporté.
 - Captures des neuf écrans principaux et quatre vues ciblées (octets/OCR/file, LLM/fiche, erreur/réessai, chat avec clavier à 360 dp), fixtures synthétiques uniquement : `/opt/documind-data/screens/mobile/v0.1.1/`, hors git. Le contrôle visuel a aussi corrigé le fond de la nouvelle modale pour qu’il soit opaque malgré le thème global des bottom sheets.
+
+#### Release v0.1.1-mobile publiée et vérifiée
+- Tag `v0.1.1-mobile` sur `ec69b16` ; [workflow du tag 40740499433](https://github.com/AlexandrLebegue/Documind/actions/runs/40740499433) entièrement vert : Android (analyze/tests, quatre APK, signatures), iOS (compilation et IPA), publication commune. [Mobile main 40740496078](https://github.com/AlexandrLebegue/Documind/actions/runs/40740496078) et [CI générale 40740496318](https://github.com/AlexandrLebegue/Documind/actions/runs/40740496318) également verts sur ce commit.
+- [Release publique](https://github.com/AlexandrLebegue/Documind/releases/tag/v0.1.1-mobile), ni brouillon ni préversion : quatre APK signés + IPA non signée + `SHA256SUMS`, six assets confirmés `uploaded`. Empreintes du fichier publié vérifiées : **5 OK**. Les archives APK contiennent les ABI attendues et la version 0.1.1 ; IPA `CFBundleShortVersionString=0.1.1`, build `2`, binaire Runner arm64 sans commande de signature et sans profil embarqué.
+- Signature APK v2 vérifiée en CI pour les quatre fichiers ; certificat SHA-256 `3bfa467e4b7bf11efd6f5ea8286f85602e4fbe643e9081c4e427b17033724174`, identique à v0.1.0 et à la clé sauvegardée. Aucun build Android local. Les comportements natifs caméra/picker ont été simulés dans les tests widget ; les correctifs restent à retester sur les téléphones de Chef.
+
+| Fichier publié | Octets | SHA-256 |
+|---|---:|---|
+| `documind-mobile-0.1.1-arm64-v8a-release.apk` | 8272448 | `464364d09e5b6914667343e33ce5154d690f3d6224042b3fa3c5b919efa59c29` |
+| `documind-mobile-0.1.1-armeabi-v7a-release.apk` | 32036 | `5f42b2950054e080c9ec0f4bd9d0b657c1368a033407fc1ed12658bbcd95b004` |
+| `documind-mobile-0.1.1-release.apk` | 7028016 | `babdc222b41a30e7826ca13eb1c2ea05effa9cd790f5a1020fe2fbc0305cee64` |
+| `documind-mobile-0.1.1-x86_64-release.apk` | 9011200 | `c0456610b920736d384cd539e648a69760c18c2df528ca3c412e5b0fd3efb990` |
+| `documind-mobile-0.1.1-unsigned.ipa` | 6752634 | `870cec8450d8116c8e679025d5bfa148f1753f45af0d629cfeba5e1b597dffff` |
