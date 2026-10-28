@@ -13,6 +13,11 @@ Future<void> showTransferSheet(BuildContext context) async {
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
+    backgroundColor: AppColors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+    ),
+    clipBehavior: Clip.antiAlias,
     builder: (_) => TransferSheet(transfers: transfers),
   );
 }
