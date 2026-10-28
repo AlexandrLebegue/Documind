@@ -130,12 +130,12 @@
 - Compression des scans : `flutter_image_compress` sur Android/iOS avec repli portable `image` (JPEG 85 %, côté long ≤ 2000 px) ; assemblage PDF via `pdf`. `image` épinglé à 4.8.0 (`4.11.0` casse avec `archive 4.0.9`).
 - Cleartext Android : `network_security_config.xml` + `usesCleartextTraffic` ; iOS : exception ATS `NSAllowsArbitraryLoads` (serveur LAN HTTP), permissions caméra/photos déclarées dans les deux plateformes.
 - Workflow CI `mobile.yml` : analyze, test, APK universel + arm64-v8a/armeabi-v7a/x86_64, contrôle des signatures avec apksigner et SHA256SUMS ; publication sur tag `v*-mobile`. Caches Flutter/pub et Gradle. Aucun build Android local.
-- [Run initial 40677708668](https://github.com/AlexandrLebegue/Documind/actions/runs/40677708668) sur `9a7c922` entièrement vert (APK debug de validation). [CI signée 40678396230](https://github.com/AlexandrLebegue/Documind/actions/runs/40678396230) lancée sur `098f78e`.
+- [Run initial 40677708668](https://github.com/AlexandrLebegue/Documind/actions/runs/40677708668) sur `9a7c922` entièrement vert (APK debug de validation). [CI signée 40678396230](https://github.com/AlexandrLebegue/Documind/actions/runs/40678396230) entièrement verte sur `098f78e` : quatre APK, signatures v2 RSA 3072 vérifiées, artefacts téléchargés et SHA256SUMS validés.
 - Signature release RSA 3072 : keystore et mots de passe sauvegardés hors git dans `~/documind-brief/android-keystore/` (fichiers chmod 600), quatre secrets GitHub configurés. Repli debug sans secrets pour les builds de validation ; publication tag refusée sans clé release.
 - Animations corrigées : cascade atteignant réellement opacité 1 et translation 0, shimmer sans ticker avec réduction des animations, transition géométrique immédiatement terminée en mode réduit, bottom sheet 240/150 ms ou sans animation.
 - 18 tests verts (dont 3 régressions animations), analyze sans erreur ; un test optionnel de captures (exécuté et vert, ignoré en CI sans variable d’export). Neuf captures golden 390×844 sur fixtures synthétiques, contrôlées visuellement : serveur, accueil, documents, chat, alertes, plus, réglages, ajout, fiche. Stockées dans `/opt/documind-data/screens/mobile/` sur LXC 105, hors git. Polices Roboto/MaterialIcons chargées explicitement dans le banc de capture.
 - Export reproductible : depuis `phone/`, définir `MOBILE_CAPTURES_DIR` (répertoire absolu), `MOBILE_CAPTURES_FONT` (Roboto-Regular.ttf du cache Flutter) et `MOBILE_CAPTURES_ICONS` (MaterialIcons-Regular.otf du même cache), puis `flutter test test/captures_test.dart --update-goldens`.
-- Test réel relancé après reprise : probe, API principales, SSE journaux et chat (session supprimée), upload PNG synthétique → statut ready → suppression, succès complet. Aucun document réel exporté. Signature/publication finale en cours.
+- Test réel relancé après reprise : probe, API principales, SSE journaux et chat (session supprimée), upload PNG synthétique → statut ready → suppression, succès complet. Aucun document réel exporté. Publication finale en cours.
 
 ### Parité écran web -> mobile
 | Écran web | Écran mobile | État |
@@ -153,3 +153,8 @@
 | `/sync` verdicts | Synchronisation (`sync_screen.dart`) | Fait |
 | `/logs` journaux | Journaux (`logs_screen.dart`) | Fait (SSE) |
 | `/settings` réglages | Réglages (`settings_screen.dart`) | Fait |
+
+### Livraison mobile — validation CI
+- [CI générale finale](https://github.com/AlexandrLebegue/Documind/actions/runs/40678907410) verte sur `0150e2b` ; [Mobile final](https://github.com/AlexandrLebegue/Documind/actions/runs/40678907417) : analyze, tests, quatre builds et vérification des signatures réussis (fermeture du cache en cours au moment du tag).
+- Certificat release SHA-256 : `3bfa467e4b7bf11efd6f5ea8286f85602e4fbe643e9081c4e427b17033724174`, identique au certificat du keystore privé. Aucune compilation Android locale.
+- Limites : scanner/caméra, partage natif et installation à valider sur téléphone Android réel ; iOS conservé mais non compilé dans ce jalon. Le PDF original s’ouvre dans une application externe ; aperçu intégré réservé aux images.
