@@ -118,3 +118,30 @@
 
 - **Release v0.1.2-desktop publiée**, tag sur `2ff21f1` : [release](https://github.com/AlexandrLebegue/Documind/releases/tag/v0.1.2-desktop), non brouillon. [CI du commit du tag](https://github.com/AlexandrLebegue/Documind/actions/runs/40498368858) entièrement verte. [Workflow du tag](https://github.com/AlexandrLebegue/Documind/actions/runs/40498372003) : job `windows-latest` entièrement vert, tests d’intégration CLI, service réel et packaging inclus. Linux encore en cours à l’installation des dépendances système au moment du contrôle ; les paquets Linux seront publiés automatiquement à sa réussite.
 - Installateur publié et téléchargé : `DocuMind_0.1.2_x64-setup.exe`, 3 215 770 octets, état API `uploaded`, reconnu PE/NSIS GUI. SHA-256 local : `6576794810c88bac0a50fc5d61a2b4fc376487873ba45792e9859adeb0e5b795`. Notes de release détaillées et instructions manuel/automatique mises à jour. Aucun changement serveur requis.
+
+## Mobile v0.1 — 2026-10-28
+- Application Flutter dans `phone/` (Android d'abord, `ios/` conservé), thème extrait du web : beige `#FAF8F5`/`#F5F0EB`/`#E8DDD3`, accent `#2E75B6`, mode clair uniquement (le web n’a pas de mode sombre), rayons/ombres identiques.
+- Premier lancement : adresse du serveur validée via `/api/system` (HTTP accepté, erreurs réseau en français), mémorisée avec `shared_preferences`, modifiable depuis Réglages. Transition géométrique reprise du client PC (`GeometricTransition`) et animations respectant « réduire les animations ».
+- Accueil (compteurs, derniers documents, répartition) et liste des documents (recherche, filtres par type, tri, grille/liste, pagination) connectés à l’API réelle ; fiche document avec Hero, aperçu, métadonnées éditables, OCR, montant, échéances, segments, téléchargement/ouverture, partage, re-analyse et suppression.
+- Code déjà présent pour l’upload fichier/galerie, le scan multi-pages (`cunning_document_scanner`), la compression JPEG 85 % / côté long ≤ 2000 px (`flutter_image_compress`), l’assemblage PDF (`pdf`) et le suivi d’analyse ; validation de bout en bout prévue au jalon 2.
+- Chat, alertes, démarches, synchronisation, journaux et réglages : écrans encore à implémenter (placeholders de navigation) au jalon 3.
+- `flutter analyze` sans erreur, test widget de démarrage vert. `image` épinglé à 4.8.0 (`4.11.0` casse avec `archive 4.0.9` : `decodeLazy` absent).
+- Cleartext Android : `network_security_config.xml` + `usesCleartextTraffic`; iOS : exception ATS `NSAllowsArbitraryLoads` (serveur LAN HTTP), permissions caméra/photos déclarées dans les deux plateformes.
+- APK non construit localement (pas de SDK Android sur le LXC 103) : workflow CI à ajouter au jalon 4.
+
+### Parité écran web -> mobile
+| Écran web | Écran mobile | État |
+|---|---|---|
+| `/` tableau de bord | Accueil (`dashboard_screen.dart`) | Fait |
+| `/documents` liste + recherche/filtres/tri | Documents (`documents_screen.dart`) | Fait |
+| `/documents/view` fiche | Fiche document (`document_detail_screen.dart`) | Fait |
+| Upload / ajout document | Bottom sheet + fichier/galerie/scanner | Code prêt, validation E2E jalon 2 |
+| `/chat` chat agent | Chat (`chat_screen.dart`) | Non fait (placeholder) |
+| `/alerts` alertes | Alertes (`alerts_screen.dart`) | Non fait (placeholder) |
+| `/procedures` liste | Démarches (`procedures_screen.dart`) | Non fait (placeholder) |
+| `/procedures/view` détail | Démarche détail | Non fait |
+| `/procedures/new` création | Démarche création | Non fait |
+| `/procedures/edit` édition | Démarche édition | Non fait |
+| `/sync` verdicts | Synchronisation (`sync_screen.dart`) | Non fait (placeholder) |
+| `/logs` journaux | Journaux (`logs_screen.dart`) | Non fait (placeholder) |
+| `/settings` réglages | Réglages (`settings_screen.dart`) | Non fait (placeholder) |

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- DocuMind se connecte à un serveur local en HTTP clair. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>
