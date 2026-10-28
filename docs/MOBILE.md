@@ -16,6 +16,11 @@ Au premier lancement, saisir l'adresse du serveur DocuMind, par exemple
 `192.168.1.50:8000`. Le téléphone doit pouvoir joindre ce serveur. L'adresse
 est mémorisée et modifiable dans Réglages → Changer de serveur.
 
+## Installation iPhone
+
+Voir le guide pas à pas [IPHONE.md](IPHONE.md) (Sideloadly + Apple ID gratuit,
+réinstallation tous les 7 jours, même Wi-Fi que le serveur).
+
 ## Utilisation
 
 - Documents : rechercher, filtrer, consulter les métadonnées et le texte OCR,
@@ -44,6 +49,6 @@ Des captures synthétiques à 390×844 sont exportables avec le test optionnel
 `test/captures_test.dart` ; voir [STATUS.md](STATUS.md) pour la commande.
 
 La CI valide la compilation et les signatures. L'installation, la caméra,
-le recadrage et le partage restent à vérifier sur un téléphone réel. Le projet
-iOS et ses permissions sont conservés ; cette version n'a pas été compilée ni
-validée sur iPhone.
+le recadrage et le partage restent à vérifier sur un téléphone réel. La CI compile
+aussi l'application iOS sans signature (IPA jointe à la release) ; elle reste à
+valider sur un iPhone réel.
