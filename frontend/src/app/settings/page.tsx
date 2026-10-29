@@ -26,8 +26,8 @@ export default function SettingsPage() {
   const [baseUrl, setBaseUrl] = useState('');
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState('');
   const [ollamaModel, setOllamaModel] = useState('');
-  const [llamacppBaseUrl, setLlamacppBaseUrl] = useState('http://192.168.1.50:8080');
-  const [llamacppModel, setLlamacppModel] = useState('local');
+  const [llamacppBaseUrl, setLlamacppBaseUrl] = useState('http://192.168.1.59:18020/v1');
+  const [llamacppModel, setLlamacppModel] = useState('qwen3.8-27b');
   const [llamacppTesting, setLlamacppTesting] = useState(false);
   const [llamacppStatus, setLlamacppStatus] = useState<'ok' | 'error' | null>(null);
   const [llamacppStatusMsg, setLlamacppStatusMsg] = useState('');
@@ -59,8 +59,8 @@ export default function SettingsPage() {
         setBaseUrl(data.openrouter_base_url);
         setOllamaBaseUrl(data.ollama_base_url ?? 'http://localhost:11434');
         setOllamaModel(data.ollama_model ?? 'llama3.2');
-        setLlamacppBaseUrl(data.llamacpp_base_url ?? 'http://192.168.1.50:8080');
-        setLlamacppModel(data.llamacpp_model ?? 'local');
+        setLlamacppBaseUrl(data.llamacpp_base_url ?? 'http://192.168.1.59:18020/v1');
+        setLlamacppModel(data.llamacpp_model ?? 'qwen3.8-27b');
         setNasEnabled(data.nas_sync_enabled ?? false);
         setNasHost(data.nas_host ?? '192.168.1.100');
         setNasShare(data.nas_share ?? 'NAS_Commun_Vol2');
@@ -187,8 +187,8 @@ export default function SettingsPage() {
       setApiKey(updated.openrouter_api_key);
       setOllamaBaseUrl(updated.ollama_base_url ?? 'http://localhost:11434');
       setOllamaModel(updated.ollama_model ?? 'llama3.2');
-      setLlamacppBaseUrl(updated.llamacpp_base_url ?? 'http://192.168.1.50:8080');
-      setLlamacppModel(updated.llamacpp_model ?? 'local');
+      setLlamacppBaseUrl(updated.llamacpp_base_url ?? 'http://192.168.1.59:18020/v1');
+      setLlamacppModel(updated.llamacpp_model ?? 'qwen3.8-27b');
       setNasEnabled(updated.nas_sync_enabled ?? false);
       setNasHost(updated.nas_host ?? '192.168.1.100');
       setNasShare(updated.nas_share ?? 'NAS_Commun_Vol2');
@@ -291,7 +291,7 @@ export default function SettingsPage() {
             {[
               { value: 'openrouter', label: 'OpenRouter', desc: 'API cloud (Gemini, Claude…)' },
               { value: 'ollama', label: 'Ollama', desc: 'Proxmox / local' },
-              { value: 'llamacpp', label: 'llama.cpp', desc: 'Serveur local GPU' },
+              { value: 'llamacpp', label: 'Qwen / vLLM', desc: 'Serveur local GPU (texte)' },
               { value: 'custom', label: 'Personnalisé', desc: 'Endpoint OpenAI-compatible' },
             ].map((p) => (
               <button
@@ -350,23 +350,23 @@ export default function SettingsPage() {
           </>
         )}
 
-        {/* llama.cpp fields */}
+        {/* local LLM fields (Qwen/vLLM) */}
         {provider === 'llamacpp' && (
           <>
             <div className="space-y-1.5">
               <label htmlFor="llamacpp-url" className="block text-sm font-medium text-[#1a1a1a]">
-                URL llama-server
+                URL du serveur LLM local
               </label>
               <input
                 id="llamacpp-url"
                 type="url"
                 value={llamacppBaseUrl}
                 onChange={(e) => setLlamacppBaseUrl(e.target.value)}
-                placeholder="http://192.168.1.50:8080"
+                placeholder="http://192.168.1.59:18020/v1"
                 className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
               />
               <p className="text-xs text-[#9ca3af]">
-                Adresse du serveur llama.cpp (<code className="font-mono">llama-server --host 0.0.0.0 --port 8080</code>).
+                Endpoint OpenAI-compatible de Qwen/vLLM (avec ou sans <code className="font-mono">/v1</code>). La clé <code className="font-mono">LLM_API_KEY</code> est lue dans les variables d&apos;environnement du serveur.
               </p>
             </div>
 
@@ -379,11 +379,11 @@ export default function SettingsPage() {
                 type="text"
                 value={llamacppModel}
                 onChange={(e) => setLlamacppModel(e.target.value)}
-                placeholder="local"
+                placeholder="qwen3.8-27b"
                 className="w-full px-3 py-2.5 bg-beige-50 border border-beige-300 rounded-lg text-sm text-[#1a1a1a] placeholder-[#9ca3af] focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent transition-colors"
               />
               <p className="text-xs text-[#9ca3af]">
-                Laisser <code className="font-mono">local</code> si un seul modèle est chargé dans llama-server.
+                Alias exposé par <code className="font-mono">/v1/models</code> (par défaut <code className="font-mono">qwen3.8-27b</code>).
               </p>
             </div>
 
