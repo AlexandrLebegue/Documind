@@ -34,11 +34,12 @@ DOCUMIND_PORT="8000"
 APP_DIR="/opt/documind"
 DATA_DIR="/opt/documind-data"
 
-# Local AI backends (OpenAI-compatible llama.cpp servers)
+# Local AI backends (OpenAI-compatible servers: vLLM for the LLM, llama.cpp for OCR)
 OVISOCR_URL="${OVISOCR_URL:-http://192.168.1.59:8081/v1}"
 OVISOCR_MODEL="${OVISOCR_MODEL:-ovisocr3}"
-LLAMACPP_BASE_URL="${LLAMACPP_BASE_URL:-http://192.168.1.59:8080}"
-LLAMACPP_MODEL="${LLAMACPP_MODEL:-minicpm5-2b}"
+LLM_BASE_URL="${LLM_BASE_URL:-${LLAMACPP_BASE_URL:-http://192.168.1.59:18020/v1}}"
+LLM_MODEL="${LLM_MODEL:-${LLAMACPP_MODEL:-qwen3.8-27b}}"
+LLM_API_KEY="${LLM_API_KEY:-}"
 OCR_DPI="${OCR_DPI:-130}"
 
 # --------------------------------------------------
@@ -109,8 +110,8 @@ ask_backends() {
     msg_info "Local AI backends (press Enter to keep the default)"
     read -rp "  OvisOCR3 URL [${OVISOCR_URL}]: " _url
     OVISOCR_URL="${_url:-$OVISOCR_URL}"
-    read -rp "  MiniCPM URL  [${LLAMACPP_BASE_URL}]: " _url
-    LLAMACPP_BASE_URL="${_url:-$LLAMACPP_BASE_URL}"
+    read -rp "  Local LLM URL  [${LLM_BASE_URL}]: " _url
+    LLM_BASE_URL="${_url:-$LLM_BASE_URL}"
     echo ""
 }
 
@@ -332,8 +333,11 @@ create_env_file() {
 # DocuMind Environment Configuration — fully local pipeline
 DOCUMIND_DATA_DIR=${DATA_DIR}
 AI_PROVIDER=llamacpp
-LLAMACPP_BASE_URL=${LLAMACPP_BASE_URL}
-LLAMACPP_MODEL=${LLAMACPP_MODEL}
+LLM_BASE_URL=${LLM_BASE_URL}
+LLM_MODEL=${LLM_MODEL}
+LLM_API_KEY=${LLM_API_KEY}
+LLM_MAX_TOKENS=16384
+LLM_LANGUAGE_MODEL_ONLY=1
 LLM_DISABLE_THINKING=1
 OCR_BACKEND=ovis
 OVISOCR_URL=${OVISOCR_URL}
@@ -426,7 +430,7 @@ print_summary() {
     echo ""
     echo -e "  ${BD}Backends:${NC}"
     echo "    OCR  ${OVISOCR_URL} (${OVISOCR_MODEL})"
-    echo "    LLM  ${LLAMACPP_BASE_URL} (${LLAMACPP_MODEL})"
+    echo "    LLM  ${LLM_BASE_URL} (${LLM_MODEL})"
     echo ""
     echo -e "  ${YW}If a backend address changes, edit ${APP_DIR}/.env and restart.${NC}"
     echo ""

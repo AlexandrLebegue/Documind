@@ -142,12 +142,16 @@ fi
 msg_info "Writing environment configuration"
 cat >"${APP_DIR}/.env" <<'ENVEOF'
 # DocuMind Environment Configuration — fully local pipeline.
-# Edit the backend addresses if OvisOCR3 / MiniCPM are not on 192.168.1.59:
+# Edit the backend addresses if OvisOCR3 / Qwen are not on 192.168.1.59:
 #   nano /opt/documind/.env  &&  systemctl restart documind
 DOCUMIND_DATA_DIR=/opt/documind-data
 AI_PROVIDER=llamacpp
-LLAMACPP_BASE_URL=http://192.168.1.59:8080
-LLAMACPP_MODEL=minicpm5-2b
+LLM_BASE_URL=http://192.168.1.59:18020/v1
+LLM_MODEL=qwen3.8-27b
+# MANDATORY: Bearer token for the local Qwen/vLLM endpoint.
+LLM_API_KEY=
+LLM_MAX_TOKENS=16384
+LLM_LANGUAGE_MODEL_ONLY=1
 LLM_DISABLE_THINKING=1
 OCR_BACKEND=ovis
 OVISOCR_URL=http://192.168.1.59:8081/v1

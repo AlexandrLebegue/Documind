@@ -1,12 +1,12 @@
 ---
 name: documind
-description: Piloter l'archive documentaire locale Documind (OCR OvisOCR3, métadonnées MiniCPM, recherche hybride, questions RAG). À utiliser dès qu'il faut téléverser, lister, consulter, rechercher, interroger, retraiter, supprimer ou mesurer des documents sur le LXC 105, sans passer par l'interface web.
+description: Piloter l'archive documentaire locale Documind (OCR OvisOCR3, métadonnées Qwen, recherche hybride, questions RAG). À utiliser dès qu'il faut téléverser, lister, consulter, rechercher, interroger, retraiter, supprimer ou mesurer des documents sur le LXC 105, sans passer par l'interface web.
 ---
 
 # Documind
 
 Documind est une archive documentaire auto-hébergée. Chaque fichier est OCRisé
-(OvisOCR3 en local, CPU, page par page), analysé par MiniCPM5-2B (texte seul),
+(OvisOCR3 en local, CPU, page par page), analysé par Qwen3.8-27B via HyperQwen/vLLM (texte seul),
 puis indexé pour la recherche plein texte + sémantique. Les scans contenant
 plusieurs documents sont découpés en fiches distinctes.
 
@@ -96,9 +96,10 @@ documind --human ask "Quelle est la date d'expiration de ma carte d'identité ?"
 - **`Cannot reach http://…`** : service arrêté ou mauvaise URL. Vérifier
   `systemctl status documind` sur le LXC 105, puis `curl /api/health`.
 - **HTTP 503 « LLM or embedding model not loaded »** : le service démarre encore
-  ou MiniCPM/Ovis est injoignable. Vérifier `/api/health`, puis les backends
-  (`http://192.168.1.59:8080/health`, `http://192.168.1.59:8081/v1/models`).
-- **MiniCPM ou Ovis ne répond pas** : réveiller la machine GPU avec
+  ou Qwen/Ovis est injoignable. Vérifier `/api/health`, puis les backends
+  (`http://192.168.1.59:18020/v1/models`, `http://192.168.1.59:8081/v1/models`).
+- **Qwen ou Ovis ne répond pas** : vérifier `LLM_API_KEY` et `LLM_BASE_URL`
+  dans l'environnement du service, puis réveiller la machine GPU avec
   `~/.local/bin/proxboss-wake "..."` puis relancer `documind status`.
 - **Document en `error`** : lire `error_message` via `documind status <id>`,
   corriger la cause, puis `documind reprocess <id> --wait`.

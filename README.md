@@ -5,8 +5,8 @@
 DocuMind ingests PDFs and images, extracts their text, classifies them, splits
 multi-document scans into separate records, and makes everything searchable and
 queryable. OCR runs with **OvisOCR3** on CPU; metadata, segmentation and chat use
-**MiniCPM5-2B** on a local GPU; embeddings are computed locally with
-`sentence-transformers`.
+**Qwen3.8-27B** served by **HyperQwen/vLLM** on a local GPU; embeddings are
+computed locally with `sentence-transformers`.
 
 ## ✨ Features
 
@@ -15,13 +15,13 @@ queryable. OCR runs with **OvisOCR3** on CPU; metadata, segmentation and chat us
 - **Smart ingestion** — native PDF text is kept when available; scanned pages are
   rendered at 130 DPI (measured speed/quality sweet spot).
 - **Automatic metadata** — title, type, issuer, date, amount, reference, expiry,
-  tags, summary — extracted by MiniCPM5-2B, text only.
+  tags, summary — extracted by Qwen3.8-27B, text only.
 - **Multi-document scans** — one PDF containing several documents is split into
   child records with page ranges; the source scan becomes a `segmented` container.
 - **Hybrid search** — SQLite FTS5 + semantic embeddings, weighted fusion.
 - **Chat with your documents** — RAG answers with source document IDs.
 - **Long documents** — map-reduce summarisation when OCR text exceeds the context
-  budget (200k chars by default).
+  budget (600k chars by default, tuned for Qwen's 196k-token context).
 - **CLI + REST API** — scriptable JSON client (`bin/documind`) and OpenAPI docs.
 - **Alerts, procedures, dashboard** — expiry warnings, renewal suggestions, gap
   detection and step-by-step administrative guides.
@@ -38,25 +38,26 @@ queryable. OCR runs with **OvisOCR3** on CPU; metadata, segmentation and chat us
                              │              │
               page JPEG      │              │  OCR text (never images)
                              ▼              ▼
-                  ┌──────────────────┐  ┌──────────────────────┐
-                  │ OvisOCR3 (CPU)   │  │ MiniCPM5-2B (GPU)    │
-                  │ :8081 /v1        │  │ :8080 /v1            │
-                  └──────────────────┘  └──────────────────────┘
+                  ┌──────────────────┐  ┌──────────────────────────┐
+                  │ OvisOCR3 (CPU)   │  │ Qwen3.8-27B (GPU/vLLM)   │
+                  │ :8081 /v1        │  │ :18020 /v1 (Bearer auth) │
+                  └──────────────────┘  └──────────────────────────┘
 ```
 
 | Layer | Technology |
 |-------|-----------|
 | Backend | Python 3.11+, FastAPI, uvicorn |
 | OCR | OvisOCR3 via llama.cpp (default), Tesseract 5 fallback (fra/eng/deu/ara) |
-| LLM | MiniCPM5-2B via llama.cpp, thinking disabled |
+| LLM | Qwen3.8-27B via HyperQwen/vLLM, text only, thinking disabled |
 | Embeddings | `all-MiniLM-L6-v2` via sentence-transformers (lazy load) |
 | Search | SQLite FTS5 + cosine similarity |
 | Frontend | React / Next.js static export |
 | Database | SQLite 3 (WAL, thread-local connections) |
 | CLI | Python standard library only |
 
-OvisOCR3 and MiniCPM are **external services** on the LAN. Their URLs are
-configurable and nothing is hard-coded to a cloud provider.
+OvisOCR3 and Qwen are **external services** on the LAN. Their URLs are
+configurable and nothing is hard-coded to a cloud provider. The LLM endpoint
+requires a Bearer token read from `LLM_API_KEY`; the key is never committed.
 
 ## 🚀 Quick Start — native LXC (recommended)
 
@@ -108,10 +109,16 @@ saved from the web UI.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DOCUMIND_DATA_DIR` | `/data` | Base directory for originals, DB, models, OCR cache, bench |
-| `AI_PROVIDER` | `llamacpp` | `llamacpp` (local MiniCPM) or legacy providers |
-| `LLAMACPP_BASE_URL` | `http://192.168.1.59:8080` | MiniCPM OpenAI-compatible endpoint |
-| `LLAMACPP_MODEL` | `minicpm5-2b` | Model alias sent to llama.cpp |
-| `LLM_DISABLE_THINKING` | `1` | Disable MiniCPM thinking for deterministic JSON |
+| `AI_PROVIDER` | `llamacpp` | `llamacpp` (local OpenAI-compatible vLLM) or legacy providers |
+| `LLM_BASE_URL` | `http://192.168.1.59:18020/v1` | Qwen/vLLM endpoint (with or without `/v1`) |
+| `LLM_MODEL` | `qwen3.8-27b` | Model alias sent to vLLM |
+| `LLM_API_KEY` | — | **Mandatory** Bearer token (never commit) |
+| `LLM_MAX_TOKENS` | `16384` | Max generated tokens (Qwen recommendation) |
+| `LLM_MAX_CONTEXT_TOKENS` | `196608` | Qwen context window |
+| `LLM_LANGUAGE_MODEL_ONLY` | `1` | Text-only profile: never send images to the LLM |
+| `LLM_DISABLE_THINKING` | `1` | Disable Qwen thinking for deterministic JSON |
+| `LLM_JSON_MODE` | `1` | Request `response_format=json_object` when supported |
+| `LLM_TIMEOUT` / `LLM_CONNECT_TIMEOUT` | `900` / `15` | Read / connect timeouts (seconds) |
 | `OVISOCR_URL` | `http://192.168.1.59:8081/v1` | OvisOCR3 OpenAI-compatible endpoint |
 | `OVISOCR_MODEL` | `ovisocr3` | OCR model alias |
 | `OCR_BACKEND` | `ovis` | `ovis` (default) or `tesseract` |
@@ -121,15 +128,18 @@ saved from the web UI.
 | `OCR_PAGE_RETRIES` | `2` | Retries before Tesseract fallback |
 | `OCR_CACHE_ENABLED` | `1` | SHA-256 page cache in `DATA_DIR/ocr_cache` |
 | `SEGMENT_MULTI_DOC` | `1` | Split scans containing several documents |
-| `LLM_MAP_CHUNK_CHARS` | `200000` | Map-reduce threshold (~50k tokens) |
-| `LLM_MAP_CHUNK_PAGES` | `8` | Page block size for map-reduce |
+| `LLM_MAP_CHUNK_CHARS` | `600000` | Map-reduce threshold (~150k tokens) |
+| `LLM_MAP_CHUNK_PAGES` | `24` | Page block size for map-reduce |
+| `LLM_SEGMENT_MAX_PAGES` / `LLM_SEGMENT_PAGE_CHARS` | `200` / `2500` | Segmentation limits |
 | `EMBEDDING_MODEL_NAME` | `all-MiniLM-L6-v2` | Local embedding model |
 | `EMBEDDING_LAZY_LOAD` | `1` | Load embeddings on first use |
 | `SQLITE_CACHE_MB` / `SQLITE_MMAP_MB` | `20` / `128` | SQLite tuning |
 | `NAS_*` | — | Optional SMB sync credentials |
 
-Legacy `AI_PROVIDER=openrouter|ollama|custom` values are still accepted by
-`llm.py`, but the default and documented setup is fully local.
+`LLAMACPP_BASE_URL` and `LLAMACPP_MODEL` remain accepted as backwards-compatible
+aliases for `LLM_BASE_URL` and `LLM_MODEL`. Legacy `AI_PROVIDER=openrouter|ollama|custom`
+values are still accepted by `llm.py`, but the default and documented setup is
+the local Qwen/vLLM endpoint.
 
 ## 📁 Data Storage
 
@@ -213,7 +223,7 @@ empreintes inconnues du serveur. Un fichier déjà accepté ou refusé n'est jam
 renvoyé, même déplacé ou renommé.
 
 Côté serveur, chaque candidat est revalidé (extension + magic bytes), OCRisé
-(cache de pages réutilisé), puis jugé par MiniCPM texte seul :
+(cache de pages réutilisé), puis jugé par Qwen texte seul :
 `{keep, confidence, reason}`. Un OUI franc crée le document en réutilisant l'OCR ;
 un NON franc supprime le fichier et ne garde que l'empreinte ; un doute
 (confiance < 0,7) part en validation manuelle dans **Synchronisation** (web et
@@ -247,7 +257,7 @@ Les builds Windows/Linux complets sont produits par
 
 `documind bench` ingests every supported file (or a list via `--files-from`),
 waits for completion, and writes one CSV row per file with pages, OCR seconds
-and seconds/page, MiniCPM seconds, number of documents produced, types/titles,
+and seconds/page, LLM seconds, number of documents produced, types/titles,
 wall time, process RSS/peak RSS and errors. `--resume` skips completed rows and
 retries interrupted ones without re-uploading.
 
@@ -330,8 +340,15 @@ python scripts/perf_profile.py startup
 python scripts/perf_profile.py db
 ```
 
-There is no test suite in the repository; validate changes with
-`python -m py_compile` and a real ingestion on the LXC test corpus.
+Run the test suite with:
+
+```bash
+pip install pytest
+pytest
+```
+
+For end-to-end validation, also ingest a small real document on the LXC test
+corpus.
 
 ## 📋 Supported Formats
 
@@ -344,8 +361,10 @@ Unsupported formats found during a folder ingest (`.docx`, `.txt`, `.rar`,
 
 - Original files and extracted text remain in `DOCUMIND_DATA_DIR`.
 - OCR images are sent only to `OVISOCR_URL`; text is sent only to
-  `LLAMACPP_BASE_URL` (both on the LAN by default).
-- No API key is required for the default local pipeline.
+  `LLM_BASE_URL` (both on the LAN by default).
+- Images are never sent to the language model (`LLM_LANGUAGE_MODEL_ONLY=1`).
+- The local LLM requires `LLM_API_KEY`; provide it through the service
+  environment and never commit it to `.env.example`, git, logs or tickets.
 - Never commit personal documents, OCR text, database files or bench CSVs.
 - The service listens on port 8000; restrict access with your firewall or a
   reverse proxy if the LAN is not trusted.

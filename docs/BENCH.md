@@ -1,4 +1,4 @@
-# Benchmark — pipeline local OvisOCR3 + MiniCPM5-2B
+# Benchmark — pipeline local OvisOCR3 + MiniCPM5-2B (historique)
 
 Mesures agrégées, sans contenu ni nom de document. Les CSV détaillés restent
 sur le LXC 105 dans `/opt/documind-data/bench/`.
@@ -9,6 +9,9 @@ sur le LXC 105 dans `/opt/documind-data/bench/`.
 - OCR : OvisOCR3 `http://192.168.1.59:8081/v1`, CPU, 1 slot, pages strictement
   séquentielles, DPI 130, prompt `plain`.
 - LLM : MiniCPM5-2B `http://192.168.1.59:8080/v1`, thinking désactivé, texte seul.
+- **Ce document est historique** : MiniCPM a été remplacé par Qwen3.8-27B
+  (`http://192.168.1.59:18020/v1`). Les temps ci-dessous ne s'appliquent pas au
+  nouveau modèle ; les prochains benchs seront publiés séparément.
 - Embeddings : `all-MiniLM-L6-v2`, CPU, chargement paresseux.
 - Temps OCR = rendu + OCR serveur par page, mesuré dans le pipeline ; temps LLM =
   extraction des métadonnées (hors embedding) ; `wall` = attente complète côté CLI,

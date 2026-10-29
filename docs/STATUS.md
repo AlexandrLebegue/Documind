@@ -6,11 +6,12 @@
 - Dépôt de travail : `/home/dev/projects/Documind` (LXC 103), branche `main`.
 - Cible : LXC 105 `documind`, `ssh root@192.168.1.67`, app `/opt/documind`, données `/opt/documind-data`, port 8000.
 - OvisOCR3 : `http://192.168.1.59:8081/v1`, modèle `ovisocr3` — **OK**.
-- MiniCPM5-2B : `http://192.168.1.59:8080/v1`, alias `minicpm5-2b` — **OK**, thinking désactivé.
+- Qwen3.8-27B (HyperQwen/vLLM) : `http://192.168.1.59:18020/v1`, alias `qwen3.8-27b` — **texte seul**, Bearer `LLM_API_KEY`, thinking désactivé.
+- Historique : MiniCPM5-2B `http://192.168.1.59:8080/v1` supprimé ; les mesures ci-dessous restent des références MiniCPM.
 - Hôte GPU `.59` : relancé par ProxBoss après saturation du cache RAM de `llama-server` (plafonné à 256 Mo).
 
 ## Décisions
-- Pipeline cible : OvisOCR3 page par page (CPU, séquentiel) → MiniCPM **texte seul** (mise en forme + métadonnées + segmentation).
+- Pipeline cible : OvisOCR3 page par page (CPU, séquentiel) → Qwen3.8-27B **texte seul** (mise en forme + métadonnées + segmentation).
 - OCR natif conservé pour les PDF numériques (texte natif par page ≥ `MIN_TEXT_LENGTH_PER_PAGE`).
 - Cache OCR par page : `sha256(fichier) + n° page` sous `DATA_DIR/ocr_cache/`.
 - Embeddings chargés paresseusement (gain RAM/démarrage), connexions SQLite réutilisées par thread.
@@ -29,7 +30,7 @@
 ## Mesures
 - Démarrage (LXC 105) : RSS 473 Mo → 32 Mo, embeddings différés (`docs/PERF.md`).
 - SQLite 1 000 docs : `init_db` 17,6 → 1,1 ms, `list` 6,8 → 0,5 ms, `stats` 9,1 → 0,6 ms.
-- OvisOCR3 8081 OK ; MiniCPM 8080 relancé par ProxBoss, health OK.
+- OvisOCR3 8081 OK ; Qwen/vLLM 18020 OK (`/v1/models` vérifié, modèle `qwen3.8-27b` présent).
 - OCR DPI retenu : **130**. CI.pdf : 100 DPI 23,9 s / 495 car. (champs prénom/lieu manquants), 130 DPI 34,8 s / 515 car., 150 DPI 45,1 s / 551 car. (+4 lignes, dont MRZ/taille). 130 = meilleur compromis.
 - Pipeline complet mesuré : CI.pdf 1 page = ~21 s (OCR + MiniCPM + embedding) ; scan 2 documents = segmentation OK (2 enfants, textes/métadonnées/embeddings séparés).
 - Service LXC 105 : RSS ~114 Mo au repos (embeddings non chargés) ; CLI `/usr/local/bin/documind` (symlink posé par l'installeur).
@@ -67,6 +68,7 @@
 - [x] M. Agent de synchronisation : filtres, cache SHA-256, service Windows/systemd, test bout en bout
 - [x] N. CI GitHub Actions (frontend, backend, agent) + workflow desktop Windows/Linux et release sur tag
 - [ ] O. Validation visuelle réelle du client Windows (poste utilisateur) et clôture du brief desktop
+- [x] P. Migration LLM local vers Qwen3.8-27B (HyperQwen/vLLM) : LLM_BASE_URL/MODEL/API_KEY, Bearer, texte seul, contexte 196k, JSON mode, tests
 
 ## Reprise desktop — 2026-10-27
 - État GitHub vérifié : CI `40477005354` et Desktop `40477005378` réussis sur `18f153b`, deux plateformes et artefacts présents. Aucune release desktop à la reprise.

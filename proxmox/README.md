@@ -68,8 +68,9 @@ chmod +x install-documind.sh
 | `CORES` | `4` | vCPU count |
 | `OVISOCR_URL` | `http://192.168.1.59:8081/v1` | OvisOCR3 endpoint |
 | `OVISOCR_MODEL` | `ovisocr3` | OCR model alias |
-| `LLAMACPP_BASE_URL` | `http://192.168.1.59:8080` | MiniCPM endpoint |
-| `LLAMACPP_MODEL` | `minicpm5-2b` | LLM model alias |
+| `LLM_BASE_URL` | `http://192.168.1.59:18020/v1` | Local Qwen/vLLM endpoint |
+| `LLM_MODEL` | `qwen3.8-27b` | LLM model alias |
+| `LLM_API_KEY` | — | Bearer token (mandatory, never commit) |
 | `OCR_DPI` | `130` | PDF render DPI |
 
 ---
