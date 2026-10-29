@@ -9,7 +9,7 @@ import httpx
 import uuid
 
 import config as _cfg
-from llm import _active_model
+from llm import _active_model, strip_thinking
 from web_tools import recherche_web, scraper_page, crawler_procedures, verifier_liens
 
 
@@ -276,8 +276,11 @@ async def run_agent(
             "tools": AGENT_TOOLS,
             "tool_choice": "auto",
             "temperature": _cfg.LLM_TEMPERATURE,
-            "max_tokens": 4096,
+            "max_tokens": min(_cfg.LLM_MAX_TOKENS, 4096),
+            "max_completion_tokens": min(_cfg.LLM_MAX_TOKENS, 4096),
         }
+        if _cfg.LLM_TEXT_ONLY and _cfg.LLM_DISABLE_THINKING:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
 
         try:
             response = llm_client.post("/chat/completions", json=payload)
@@ -297,7 +300,7 @@ async def run_agent(
 
         # Done — return the text reply
         if finish_reason in ("stop", "end_turn") or not msg.get("tool_calls"):
-            reply = msg.get("content") or ""
+            reply = strip_thinking(msg.get("content") or "")
             return reply, tool_calls_log
 
         # Process tool calls

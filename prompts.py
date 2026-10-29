@@ -3,7 +3,7 @@
 from classification import VALID_DOC_TYPES
 
 METADATA_EXTRACTION_PROMPT = """Tu es un assistant spécialisé dans l'analyse de documents administratifs français.
-Analyse le contenu suivant (texte extrait par OCR et/ou images du document) et extrais les métadonnées en JSON strict.
+Analyse le texte suivant (extrait par OCR ou texte natif du PDF) et extrais les métadonnées en JSON strict.
 Champs à extraire :
 - "titre": un titre court et descriptif pour le document (ex: "Facture EDF Janvier 2024", "Fiche de paie Mars 2024")
 - "type": type de document, UNIQUEMENT parmi : facture, fiche_de_paie, avis_imposition, contrat, attestation, courrier, banque, quittance, identite, scolarite, sante, logement, emploi, administratif, autre
@@ -28,8 +28,7 @@ Champs à extraire :
 - "date_expiration": date de fin de validité du document au format YYYY-MM-DD (null si pas applicable). Exemples : date d'expiration d'une carte d'identité, fin de validité d'une attestation, date de fin d'un contrat, date limite d'un certificat, fin de validité d'une assurance.
 - "date_echeance": date d'échéance de paiement au format YYYY-MM-DD (null si pas de paiement). Exemples : date limite de paiement d'une facture, échéance d'un prêt, date limite de régularisation.
 
-Si des images du document sont fournies, utilise-les pour vérifier et compléter les informations extraites du texte OCR.
-Prête attention aux logos, en-têtes, tampons, signatures et mise en page visuelle.
+Le texte est la seule source d'information : n'invente rien et ne suppose pas d'éléments absents du texte.
 
 Réponds UNIQUEMENT avec le JSON, sans texte avant ni après, sans blocs de code markdown."""
 
@@ -186,8 +185,8 @@ Réponds UNIQUEMENT avec le JSON final, sans texte avant ni après ni bloc de co
 OCR_TEXT_ONLY_NOTE = """Le texte ci-dessous a été extrait par OCR. Il peut contenir des erreurs de reconnaissance (caractères isolés, coupures de mots, tableaux aplatis). Interprète-le avec prudence sans inventer d'information absente."""
 
 
-def segmentation_user_message(pages: list[str], max_chars_per_page: int = 1400) -> str:
-    """Build the user message sent to MiniCPM for page segmentation."""
+def segmentation_user_message(pages: list[str], max_chars_per_page: int = 2500) -> str:
+    """Build the user message sent to the LLM for page segmentation."""
     parts: list[str] = []
     for i, text in enumerate(pages, 1):
         snippet = (text or "").strip()

@@ -282,7 +282,7 @@ class SettingsResponse(BaseModel):
     """Current application settings (API key is masked)."""
 
     version: str = "unknown"
-    ai_provider: str = Field(..., description="Active AI provider: openrouter | ollama | custom")
+    ai_provider: str = Field(..., description="Active AI provider: llamacpp (local vLLM) | openrouter | ollama | custom")
     openrouter_api_key: str = Field(
         ..., description="Masked API key (only last 4 characters visible)"
     )
@@ -290,8 +290,8 @@ class SettingsResponse(BaseModel):
     openrouter_base_url: str
     ollama_base_url: str
     ollama_model: str
-    llamacpp_base_url: str = "http://192.168.1.50:8080"
-    llamacpp_model: str = "local"
+    llamacpp_base_url: str = "http://192.168.1.59:18020/v1"
+    llamacpp_model: str = "qwen3.8-27b"
     data_dir: str
     # NAS sync settings
     nas_sync_enabled: bool = False
@@ -307,7 +307,7 @@ class SettingsUpdateRequest(BaseModel):
     """Partial update payload for application settings."""
 
     ai_provider: Optional[str] = Field(
-        None, description="AI provider: openrouter | ollama | custom"
+        None, description="AI provider: llamacpp (local vLLM) | openrouter | ollama | custom"
     )
     openrouter_api_key: Optional[str] = Field(
         None, description="OpenRouter API key (full key)"
@@ -325,10 +325,10 @@ class SettingsUpdateRequest(BaseModel):
         None, description="Ollama model name (e.g. llama3.2, mistral)"
     )
     llamacpp_base_url: Optional[str] = Field(
-        None, description="llama.cpp server URL (e.g. http://192.168.1.50:8080)"
+        None, description="Local OpenAI-compatible LLM URL (e.g. http://192.168.1.59:18020/v1)"
     )
     llamacpp_model: Optional[str] = Field(
-        None, description="Model name to pass to llama-server (default: 'local')"
+        None, description="Model name to pass to the local LLM (default: 'qwen3.8-27b')"
     )
     # NAS sync settings
     nas_sync_enabled: Optional[bool] = None

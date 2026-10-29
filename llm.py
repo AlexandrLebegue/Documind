@@ -1,4 +1,8 @@
-"""LLM module: OpenRouter / Ollama / custom API wrapper for metadata extraction and chat."""
+"""LLM module: OpenAI-compatible client for metadata extraction and chat.
+
+The default backend is HyperQwen/vLLM hosting Qwen3.8-27B (text-only).
+OpenRouter, Ollama and custom endpoints remain supported as legacy providers.
+"""
 
 import json
 import logging
@@ -26,8 +30,8 @@ from prompts import (
 logger = logging.getLogger(__name__)
 
 # Maximum characters of OCR text sent in a single call. Beyond this we use a
-# map-reduce strategy (chunks of pages + merge). ~4 chars ≈ 1 token, and the
-# MiniCPM server exposes a 98k-token context.
+# map-reduce strategy (chunks of pages + merge). ~4 chars ≈ 1 token, and
+# Qwen3.8-27B exposes a 196608-token context.
 _MAX_OCR_CHARS = _cfg.LLM_MAP_CHUNK_CHARS
 
 # Maximum number of images to include in a multimodal request
@@ -36,42 +40,124 @@ _MAX_IMAGES = 3
 # Maximum characters per document in RAG context (~500 tokens)
 _MAX_RAG_DOC_CHARS = 2000
 
-# Timeout for LLM API calls (seconds) — increase for slow local models
-_API_TIMEOUT = 600.0
+# Timeout for LLM API calls (seconds) — long reads are expected with a 27B model
+_API_TIMEOUT = _cfg.LLM_TIMEOUT
+
+# Provider ids that map to the local OpenAI-compatible endpoint.
+_LOCAL_PROVIDERS = {"llamacpp", "vllm", "local", "qwen"}
+
+_THINK_BLOCK_RE = re.compile(
+    r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.IGNORECASE
+)
+_THINK_TAG_RE = re.compile(r"</?think(?:ing)?>", re.IGNORECASE)
+
+
+class LLMError(RuntimeError):
+    """Base class for LLM transport/configuration errors."""
+
+
+class LLMAuthError(LLMError):
+    """Raised when the LLM rejects our credentials (HTTP 401/403)."""
+
+
+class LLMAPIError(LLMError):
+    """Raised when the LLM returns an unexpected HTTP status."""
+
+    def __init__(self, message: str, status_code: int | None = None, body: str = ""):
+        super().__init__(message)
+        self.status_code = status_code
+        self.body = body
+
+
+def normalize_base_url(base_url: str) -> str:
+    """Return *base_url* with a single ``/v1`` suffix and no trailing slash.
+
+    Accepts both ``http://host:port`` and ``http://host:port/v1`` so existing
+    deployments do not need to change their configuration.
+    """
+    url = (base_url or "").strip().rstrip("/")
+    if not url:
+        return url
+    if not url.endswith("/v1"):
+        url += "/v1"
+    return url
+
+
+def _auth_headers(api_key: str | None = None) -> dict[str, str]:
+    """Build JSON + optional Bearer headers for the LLM endpoint."""
+    headers = {"Content-Type": "application/json"}
+    key = (api_key if api_key is not None else _cfg.LLM_API_KEY) or ""
+    if key.strip():
+        headers["Authorization"] = f"Bearer {key.strip()}"
+    return headers
+
+
+def _is_local_provider(provider: str | None = None) -> bool:
+    return (provider or _cfg.AI_PROVIDER) in _LOCAL_PROVIDERS
 
 
 def _active_model() -> str:
     """Return the model identifier for the currently active provider."""
     if _cfg.AI_PROVIDER == "ollama":
         return _cfg.OLLAMA_MODEL
-    if _cfg.AI_PROVIDER == "llamacpp":
-        return _cfg.LLAMACPP_MODEL
+    if _is_local_provider():
+        return _cfg.LLM_MODEL
     return _cfg.OPENROUTER_MODEL
+
+
+def strip_thinking(text: str) -> str:
+    """Remove residual ``<think>…</think>`` blocks from a model response."""
+    if not text:
+        return ""
+    cleaned = _THINK_BLOCK_RE.sub("", text)
+    cleaned = _THINK_TAG_RE.sub("", cleaned)
+    return cleaned.strip()
+
+
+def _models_from_response(data: dict) -> list[str]:
+    """Extract model ids from a ``/v1/models`` payload."""
+    entries = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return []
+    return [
+        str(item.get("id"))
+        for item in entries
+        if isinstance(item, dict) and item.get("id")
+    ]
+
+
+def _model_is_listed(model: str, models: list[str]) -> bool:
+    """Return True when *model* is exposed by the server (exact or tagged)."""
+    if not model:
+        return False
+    return any(candidate == model or candidate.startswith(f"{model}:") for candidate in models)
 
 
 def init_llm_client() -> httpx.Client:
     """Create an httpx client pre-configured for the active AI provider.
 
     Supported providers (``config.AI_PROVIDER``):
+    - ``"llamacpp"`` / ``"vllm"`` / ``"local"`` / ``"qwen"`` — local
+      OpenAI-compatible server (HyperQwen/vLLM, Bearer auth required)
+    - ``"ollama"``     — Local/remote Ollama instance
     - ``"openrouter"`` — OpenRouter cloud API (requires API key)
-    - ``"ollama"``     — Local/remote Ollama instance (no key needed)
     - ``"custom"``     — OpenAI-compatible endpoint with custom base URL
 
     Returns:
         An :class:`httpx.Client` ready for ``/chat/completions`` calls.
 
     Raises:
-        ValueError: If OpenRouter/custom is selected but the API key is missing.
+        ValueError: If a local/OpenRouter/custom provider lacks its API key.
     """
     provider = _cfg.AI_PROVIDER
 
     if provider == "ollama":
         # Ollama exposes an OpenAI-compatible endpoint — no auth required
-        base_url = _cfg.OLLAMA_BASE_URL.rstrip("/") + "/v1"
+        base_url = normalize_base_url(_cfg.OLLAMA_BASE_URL)
         client = httpx.Client(
             base_url=base_url,
             headers={"Content-Type": "application/json"},
-            timeout=_API_TIMEOUT,
+            timeout=httpx.Timeout(_API_TIMEOUT, connect=_cfg.LLM_CONNECT_TIMEOUT),
         )
         logger.info(
             "Ollama LLM client initialised (model=%s, base_url=%s)",
@@ -80,17 +166,24 @@ def init_llm_client() -> httpx.Client:
         )
         return client
 
-    if provider == "llamacpp":
-        # llama-server exposes an OpenAI-compatible endpoint — no auth required
-        base_url = _cfg.LLAMACPP_BASE_URL.rstrip("/") + "/v1"
+    if _is_local_provider(provider):
+        # HyperQwen/vLLM exposes an OpenAI-compatible endpoint with mandatory
+        # Bearer authentication. Never log the key itself.
+        base_url = normalize_base_url(_cfg.LLM_BASE_URL)
+        if not _cfg.LLM_API_KEY:
+            raise ValueError(
+                "LLM_API_KEY is not set. The local Qwen/vLLM endpoint requires "
+                "a Bearer token via the LLM_API_KEY environment variable."
+            )
         client = httpx.Client(
             base_url=base_url,
-            headers={"Content-Type": "application/json"},
-            timeout=_API_TIMEOUT,
+            headers=_auth_headers(),
+            timeout=httpx.Timeout(_API_TIMEOUT, connect=_cfg.LLM_CONNECT_TIMEOUT),
         )
         logger.info(
-            "llama.cpp LLM client initialised (model=%s, base_url=%s)",
-            _cfg.LLAMACPP_MODEL,
+            "Local LLM client initialised (provider=%s, model=%s, base_url=%s, auth=bearer)",
+            provider,
+            _cfg.LLM_MODEL,
             base_url,
         )
         return client
@@ -121,6 +214,54 @@ def init_llm_client() -> httpx.Client:
     return client
 
 
+def check_llm_health(timeout: float | None = None) -> dict:
+    """Probe the configured LLM ``/v1/models`` endpoint and verify the model.
+
+    Returns a dict with ``base_url``, ``model``, ``models``, ``model_found``
+    and the raw ``detail`` payload. Raises :class:`LLMAuthError` on 401/403
+    and :class:`LLMAPIError`/``LLMError`` on transport or server failures.
+    """
+    base_url = normalize_base_url(_cfg.LLM_BASE_URL)
+    if _is_local_provider() and not _cfg.LLM_API_KEY:
+        raise LLMAuthError(
+            "LLM_API_KEY is not set — the Qwen/vLLM endpoint requires a Bearer token."
+        )
+
+    probe_timeout = timeout or min(_cfg.LLM_CONNECT_TIMEOUT + 5.0, 30.0)
+    try:
+        with httpx.Client(timeout=probe_timeout) as client:
+            response = client.get(f"{base_url}/models", headers=_auth_headers())
+    except httpx.RequestError as exc:
+        raise LLMError(f"LLM endpoint unreachable at {base_url}: {exc}") from exc
+
+    if response.status_code in (401, 403):
+        raise LLMAuthError(
+            f"LLM authentication failed (HTTP {response.status_code}). "
+            "Check the LLM_API_KEY environment variable."
+        )
+    if response.status_code >= 400:
+        body = response.text[:500]
+        raise LLMAPIError(
+            f"LLM /models returned HTTP {response.status_code}: {body}",
+            status_code=response.status_code,
+            body=body,
+        )
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise LLMAPIError("LLM /models returned invalid JSON", body=response.text[:500]) from exc
+
+    models = _models_from_response(data)
+    return {
+        "base_url": base_url,
+        "model": _cfg.LLM_MODEL,
+        "models": models,
+        "model_found": _model_is_listed(_cfg.LLM_MODEL, models),
+        "detail": data,
+    }
+
+
 def _call_llm(
     client: httpx.Client,
     system_prompt: str,
@@ -128,36 +269,41 @@ def _call_llm(
     images: list[str] | None = None,
     temperature: float = _cfg.LLM_TEMPERATURE,
     max_tokens: int = _cfg.LLM_MAX_TOKENS,
+    json_mode: bool = False,
 ) -> str:
-    """Send a chat-completion request to OpenRouter.
+    """Send a chat-completion request to the active OpenAI-compatible LLM.
 
-    Supports multimodal requests: when *images* is provided, the user
-    message is formatted as a content array with text and image_url parts
-    following the OpenAI vision API format.
+    Images are only sent to vision-capable providers. With the new
+    ``LLM_LANGUAGE_MODEL_ONLY``/``LLM_TEXT_ONLY`` profile (the default for the
+    local Qwen model), images are always dropped: OvisOCR3 handles them
+    upstream and the language model receives text only.
 
     Args:
-        client: Pre-configured :class:`httpx.Client` for OpenRouter.
+        client: Pre-configured :class:`httpx.Client` for the LLM provider.
         system_prompt: System-level instruction for the model.
         user_message: User-facing message / document text.
         images: Optional list of base64-encoded JPEG strings to include
-            as vision input alongside the text.
+            as vision input alongside the text (ignored in text-only mode).
         temperature: Sampling temperature.
         max_tokens: Maximum tokens in the response.
+        json_mode: Ask for ``response_format=json_object`` when enabled.
+            The call is retried without it if the server rejects the field.
 
     Returns:
-        The assistant message content as a string.
+        The assistant message content as a string, with any residual
+        ``<think>…</think>`` block removed.
 
     Raises:
-        httpx.HTTPStatusError: If the API returns a non-2xx status.
-        KeyError: If the response structure is unexpected.
+        LLMAuthError: On HTTP 401/403 (missing or invalid ``LLM_API_KEY``).
+        LLMAPIError: On any other non-2xx status.
+        LLMError: On transport failures or an unexpected response shape.
     """
-    # MiniCPM5-2B is a TEXT-ONLY model. Never send images to the llamacpp
-    # provider, even if a caller still passes some (e.g. legacy procedure
-    # analysis path). Images are handled upstream by OvisOCR3.
-    text_only = _cfg.AI_PROVIDER == "llamacpp"
+    # Text-only profile: never send images to the language model. Images are
+    # handled upstream by OvisOCR3. Local providers are always text-only.
+    text_only = _cfg.LLM_TEXT_ONLY or _is_local_provider()
     if text_only and images:
         logger.info(
-            "Ignoring %d image(s): the llamacpp provider is text-only",
+            "Ignoring %d image(s): the language model is configured as text-only",
             len(images),
         )
         images = None
@@ -193,13 +339,46 @@ def _call_llm(
     }
     if text_only and _cfg.LLM_DISABLE_THINKING:
         payload["chat_template_kwargs"] = {"enable_thinking": False}
+    if json_mode and _cfg.LLM_JSON_MODE:
+        payload["response_format"] = {"type": "json_object"}
 
-    response = client.post("/chat/completions", json=payload)
-    response.raise_for_status()
+    try:
+        response = client.post("/chat/completions", json=payload)
+    except httpx.RequestError as exc:
+        raise LLMError(
+            f"LLM request failed ({_active_model()} at {client.base_url}): {exc}"
+        ) from exc
 
-    data = response.json()
-    choice = data["choices"][0]
-    content = choice["message"]["content"]
+    # Some OpenAI-compatible servers do not implement response_format.
+    # Retry once without it instead of failing the whole extraction.
+    if response.status_code == 400 and "response_format" in payload:
+        logger.warning(
+            "LLM rejected response_format=json_object (%s); retrying without JSON mode",
+            response.text[:200],
+        )
+        payload.pop("response_format", None)
+        try:
+            response = client.post("/chat/completions", json=payload)
+        except httpx.RequestError as exc:
+            raise LLMError(f"LLM request failed: {exc}") from exc
+
+    _raise_for_status(response, json_mode=json_mode)
+
+    try:
+        data = response.json()
+        choice = data["choices"][0]
+        message = choice.get("message") or {}
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise LLMError(f"Unexpected LLM response structure: {response.text[:300]}") from exc
+
+    content = message.get("content")
+    if isinstance(content, list):
+        content = "".join(
+            part.get("text", "") for part in content if isinstance(part, dict)
+        )
+    if not content:
+        content = message.get("reasoning_content") or ""
+    content = strip_thinking(content or "")
 
     # Log finish reason to detect truncation
     finish_reason = choice.get("finish_reason", "unknown")
@@ -222,6 +401,28 @@ def _call_llm(
         )
 
     return content
+
+
+def _raise_for_status(response: httpx.Response, json_mode: bool = False) -> None:
+    """Raise a clear, typed error for LLM HTTP failures."""
+    status = response.status_code
+    if status in (401, 403):
+        logger.error(
+            "LLM authentication failed (HTTP %d) — check LLM_API_KEY", status
+        )
+        raise LLMAuthError(
+            f"LLM authentication failed (HTTP {status}). "
+            "Check the LLM_API_KEY environment variable."
+        )
+    if status >= 400:
+        body = response.text[:500]
+        if json_mode:
+            logger.warning("LLM JSON-mode request failed with HTTP %d: %s", status, body)
+        raise LLMAPIError(
+            f"LLM API error (HTTP {status}): {body}",
+            status_code=status,
+            body=body,
+        )
 
 
 def _strip_code_fences(text: str) -> str:
@@ -285,7 +486,7 @@ def _extract_json(response_text: str, opener: str = "{"):
     Tries a direct parse, then a balanced-bracket extraction, then a repair
     of trailing commas. Returns ``None`` when nothing usable is found.
     """
-    text = _strip_code_fences(response_text)
+    text = _strip_code_fences(strip_thinking(response_text))
     candidates: list[str] = [text]
 
     balanced = _balanced_json_text(text, opener)
@@ -495,6 +696,7 @@ def _metadata_for_chunk(
             client,
             system_prompt=METADATA_EXTRACTION_PROMPT,
             user_message=user_message,
+            json_mode=True,
         )
         return _parse_and_validate_metadata(raw, source_text=chunk, filename=filename)
     except Exception:
@@ -534,6 +736,7 @@ def _extract_metadata_map_reduce(
             client,
             system_prompt=METADATA_MERGE_PROMPT,
             user_message=json.dumps(partials, ensure_ascii=False),
+            json_mode=True,
         )
         merged = _parse_and_validate_metadata(
             raw,
@@ -562,7 +765,7 @@ def extract_metadata(
     filename: str | None = None,
     preferred_title: str | None = None,
 ) -> dict:
-    """Extract structured metadata from OCR text (text-only MiniCPM).
+    """Extract structured metadata from OCR text (text-only LLM profile).
 
     For long documents the text is split into page-aware chunks, metadata is
     extracted per chunk, then merged (map-reduce). Makes one repair attempt
@@ -571,8 +774,8 @@ def extract_metadata(
     Args:
         client: Pre-configured :class:`httpx.Client` for the LLM provider.
         ocr_text: Text extracted via OCR / native PDF parsing.
-        images: Ignored for the text-only llamacpp provider; forwarded to
-            vision-capable providers only.
+        images: Ignored in text-only mode (the default for the local Qwen
+            model); forwarded to vision-capable providers only.
 
     Returns:
         Dictionary with the document metadata fields.
@@ -606,6 +809,7 @@ def extract_metadata(
             system_prompt=METADATA_EXTRACTION_PROMPT,
             user_message=user_message,
             images=images,
+            json_mode=True,
         )
         metadata = _parse_and_validate_metadata(
             raw_response,
@@ -633,6 +837,7 @@ def extract_metadata(
             client,
             system_prompt=METADATA_EXTRACTION_PROMPT,
             user_message=correction_user_msg,
+            json_mode=True,
         )
         metadata = _parse_and_validate_metadata(
             raw_response,
@@ -689,6 +894,7 @@ def judge_document(
             user_message=user_message,
             temperature=0.0,
             max_tokens=400,
+            json_mode=True,
         )
         data = _extract_json(raw)
     except Exception:
@@ -784,7 +990,7 @@ def _sanitize_segments(raw_segments, pages_total: int) -> list[dict]:
 
 
 def segment_documents(client: httpx.Client, pages: list[str]) -> list[dict]:
-    """Ask MiniCPM whether a scanned file contains multiple documents.
+    """Ask the LLM whether a scanned file contains multiple documents.
 
     Returns a list of ``{"pages": [start, end], "type": str, "titre": str}``
     segments covering all pages. Falls back to a single document whenever
@@ -794,8 +1000,12 @@ def segment_documents(client: httpx.Client, pages: list[str]) -> list[dict]:
     single = [{"pages": [1, pages_total], "type": None, "titre": None}]
     if pages_total <= 1 or not _cfg.SEGMENT_MULTI_DOC:
         return single
-    if pages_total > 60:
-        logger.info("Segmentation skipped for %d-page file (likely one document)", pages_total)
+    if pages_total > _cfg.LLM_SEGMENT_MAX_PAGES:
+        logger.info(
+            "Segmentation skipped for %d-page file (limit %d, likely one document)",
+            pages_total,
+            _cfg.LLM_SEGMENT_MAX_PAGES,
+        )
         return single
 
     # Very short OCR pages are unlikely to carry enough signal to split safely.
@@ -807,8 +1017,10 @@ def segment_documents(client: httpx.Client, pages: list[str]) -> list[dict]:
         raw = _call_llm(
             client,
             system_prompt=SEGMENTATION_PROMPT,
-            user_message=segmentation_user_message(pages),
-            max_tokens=2048,
+            user_message=segmentation_user_message(
+                pages, max_chars_per_page=_cfg.LLM_SEGMENT_PAGE_CHARS
+            ),
+            max_tokens=min(_cfg.LLM_MAX_TOKENS, 8192),
         )
         parsed = _extract_json(raw, "[")
         segments = _sanitize_segments(parsed, pages_total)
@@ -979,7 +1191,7 @@ def _parse_procedure_json(response_text: str) -> dict | None:
         Validated procedure dict with name, description, required_documents,
         or None on failure.
     """
-    text = response_text.strip()
+    text = strip_thinking(response_text).strip()
     logger.debug("Raw procedure LLM response (%d chars):\n%s", len(text), text[:2000])
 
     # Strip markdown code fences
@@ -1109,7 +1321,8 @@ def analyze_procedure(
             system_prompt=system_prompt,
             user_message=user_message,
             images=images,
-            max_tokens=8192,
+            max_tokens=_cfg.LLM_MAX_TOKENS,
+            json_mode=True,
         )
         result = _parse_procedure_json(raw_response)
     except Exception:
@@ -1183,11 +1396,12 @@ def match_document_for_procedure(
             client,
             system_prompt=system_prompt,
             user_message=f"Trouve le meilleur document correspondant à : {required_doc.get('label', '')} pour {person_name}",
-            max_tokens=8192,
+            max_tokens=_cfg.LLM_MAX_TOKENS,
+            json_mode=True,
         )
 
         # Parse JSON response
-        text = raw_response.strip()
+        text = strip_thinking(raw_response).strip()
         fence_match = re.search(r'```(?:json)?\s*\n?(.*?)```', text, re.DOTALL)
         if fence_match:
             text = fence_match.group(1).strip()

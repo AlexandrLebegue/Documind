@@ -80,7 +80,11 @@ from ingest import (
     validate_candidate_path,
 )
 from search import hybrid_search, load_embeddings_cache, refresh_embeddings_cache
-from llm import init_llm_client, chat_with_context, chat_with_context_multiturn, analyze_procedure, match_document_for_procedure
+from llm import (
+    init_llm_client, chat_with_context, chat_with_context_multiturn,
+    analyze_procedure, match_document_for_procedure, check_llm_health,
+    LLMError, LLMAuthError,
+)
 from embeddings import load_embedding_model
 from agent import run_agent
 from update import check_for_update, apply_update, install_dependencies, restart_server
@@ -290,7 +294,7 @@ async def lifespan(app: FastAPI):
 
     Startup sequence:
         1. Initialize the SQLite database (schema + triggers).
-        2. Create the OpenRouter LLM client.
+        2. Create the OpenAI-compatible LLM client (Qwen3.8-27B / vLLM).
         3. Load the sentence-transformer embedding model.
         4. Populate the in-memory embeddings cache.
     """
@@ -309,11 +313,11 @@ async def lifespan(app: FastAPI):
     init_db()
     logger.info("Database initialized")
 
-    # 2. Create OpenRouter LLM client
+    # 2. Create the OpenAI-compatible LLM client (Qwen3.8-27B / vLLM)
     try:
         app.state.llm = init_llm_client()
-        logger.info("OpenRouter LLM client ready")
-    except ValueError as exc:
+        logger.info("LLM client ready")
+    except (ValueError, LLMError) as exc:
         app.state.llm = None
         logger.warning("LLM client not available: %s", exc)
 
@@ -350,7 +354,7 @@ async def lifespan(app: FastAPI):
     get_queue().stop()
     if app.state.llm is not None:
         app.state.llm.close()
-        logger.info("OpenRouter LLM client closed")
+        logger.info("LLM client closed")
     logger.info("DocuMind shutting down...")
 
 
@@ -360,7 +364,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="DocuMind",
-    description="Document management with OCR + AI (OpenRouter LLM)",
+    description="Document management with OCR + local LLM (Qwen3.8-27B)",
     version="0.2.0",
     lifespan=lifespan,
 )
@@ -1804,8 +1808,8 @@ async def get_settings():
         openrouter_base_url=_config_module.OPENROUTER_BASE_URL,
         ollama_base_url=_config_module.OLLAMA_BASE_URL,
         ollama_model=_config_module.OLLAMA_MODEL,
-        llamacpp_base_url=_config_module.LLAMACPP_BASE_URL,
-        llamacpp_model=_config_module.LLAMACPP_MODEL,
+        llamacpp_base_url=_config_module.LLM_BASE_URL,
+        llamacpp_model=_config_module.LLM_MODEL,
         data_dir=DATA_DIR,
         nas_sync_enabled=saved.get("nas_sync_enabled", False),
         nas_host=saved.get("nas_host", "192.168.1.100"),
@@ -1848,10 +1852,14 @@ async def update_settings(body: SettingsUpdateRequest):
         current["ollama_model"] = body.ollama_model
         _config_module.OLLAMA_MODEL = body.ollama_model
     if body.llamacpp_base_url is not None:
+        current["llm_base_url"] = body.llamacpp_base_url
         current["llamacpp_base_url"] = body.llamacpp_base_url
+        _config_module.LLM_BASE_URL = body.llamacpp_base_url
         _config_module.LLAMACPP_BASE_URL = body.llamacpp_base_url
     if body.llamacpp_model is not None:
+        current["llm_model"] = body.llamacpp_model
         current["llamacpp_model"] = body.llamacpp_model
+        _config_module.LLM_MODEL = body.llamacpp_model
         _config_module.LLAMACPP_MODEL = body.llamacpp_model
 
     # NAS sync settings
@@ -1892,7 +1900,7 @@ async def update_settings(body: SettingsUpdateRequest):
             logger.info("Previous LLM client closed")
         app.state.llm = init_llm_client()
         logger.info("LLM client reloaded with new settings")
-    except ValueError as exc:
+    except (ValueError, LLMError) as exc:
         app.state.llm = None
         logger.warning("LLM client not available after settings update: %s", exc)
 
@@ -1910,8 +1918,8 @@ async def update_settings(body: SettingsUpdateRequest):
         openrouter_base_url=_config_module.OPENROUTER_BASE_URL,
         ollama_base_url=_config_module.OLLAMA_BASE_URL,
         ollama_model=_config_module.OLLAMA_MODEL,
-        llamacpp_base_url=_config_module.LLAMACPP_BASE_URL,
-        llamacpp_model=_config_module.LLAMACPP_MODEL,
+        llamacpp_base_url=_config_module.LLM_BASE_URL,
+        llamacpp_model=_config_module.LLM_MODEL,
         data_dir=DATA_DIR,
         nas_sync_enabled=current.get("nas_sync_enabled", False),
         nas_host=current.get("nas_host", "192.168.1.100"),
@@ -2264,43 +2272,57 @@ async def get_queue_status() -> QueueStatusResponse:
 
 
 # ---------------------------------------------------------------------------
-# llama.cpp server connectivity test
+# LLM server connectivity test (Qwen3.8-27B / vLLM)
 # ---------------------------------------------------------------------------
 
 
 @app.post(
-    "/api/llamacpp/test",
-    summary="Test llama.cpp server connection",
-    description="Sends a minimal request to the configured llama.cpp server and returns connection status.",
+    "/api/llm/test",
+    summary="Test local LLM connection",
+    description="Probes /v1/models with the configured Bearer token and verifies that the configured model is exposed.",
 )
-async def test_llamacpp_connection() -> JSONResponse:
-    """Test connectivity to the llama.cpp server."""
+@app.post(
+    "/api/llamacpp/test",
+    include_in_schema=False,
+    summary="Test local LLM connection (legacy path)",
+)
+async def test_llm_connection() -> JSONResponse:
+    """Test connectivity and authentication of the local LLM server."""
     import asyncio
-    import httpx as _httpx
 
-    base_url = _config_module.LLAMACPP_BASE_URL.rstrip("/")
     try:
         loop = asyncio.get_event_loop()
-        def _probe():
-            with _httpx.Client(timeout=5.0) as c:
-                # Try /health endpoint first (llama-server exposes it)
-                try:
-                    r = c.get(f"{base_url}/health")
-                    if r.status_code == 200:
-                        return {"ok": True, "detail": r.json()}
-                except Exception:
-                    pass
-                # Fallback: try /v1/models
-                r = c.get(f"{base_url}/v1/models")
-                r.raise_for_status()
-                return {"ok": True, "detail": r.json()}
-        result = await loop.run_in_executor(None, _probe)
-        return JSONResponse(content={"status": "ok", **result})
+        result = await loop.run_in_executor(None, check_llm_health)
+    except LLMAuthError as exc:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "error": "auth", "detail": str(exc)},
+        )
+    except LLMError as exc:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "error": "unreachable", "detail": str(exc)},
+        )
     except Exception as exc:
         return JSONResponse(
             status_code=503,
             content={"status": "error", "detail": str(exc)},
         )
+
+    if not result.get("model_found"):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "error",
+                "error": "model_not_found",
+                "detail": (
+                    f"Model '{result['model']}' is not exposed by {result['base_url']} "
+                    f"(available: {', '.join(result['models']) or 'none'})"
+                ),
+                **result,
+            },
+        )
+    return JSONResponse(content={"status": "ok", **result})
 
 
 # ---------------------------------------------------------------------------

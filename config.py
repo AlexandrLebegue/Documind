@@ -51,9 +51,27 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-# AI provider — "llamacpp" | "openrouter" | "ollama" | "custom"
-# Saved settings take precedence over env vars. The default is the local
-# llama.cpp server (MiniCPM) so no paid API key is required.
+def _first_setting(candidates: tuple[tuple[str, str], ...], default):
+    """Return the first non-empty value among ordered (saved, env) pairs.
+
+    Each pair is tried in order, saved value before environment value, so a
+    canonical ``LLM_*`` env var still wins over a legacy ``llamacpp_*`` saved
+    setting from an older installation.
+    """
+    for saved_key, env_name in candidates:
+        value = _saved.get(saved_key)
+        if value not in (None, ""):
+            return value
+        value = os.environ.get(env_name)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+# AI provider — "llamacpp" (local OpenAI-compatible server) | "ollama" |
+# "openrouter" | "custom". Saved settings take precedence over env vars.
+# The default local provider id stays "llamacpp" for backwards compatibility;
+# the server behind it is now HyperQwen/vLLM hosting Qwen3.8-27B.
 AI_PROVIDER = _saved.get(
     "ai_provider",
     os.environ.get("AI_PROVIDER", "llamacpp"),
@@ -83,20 +101,49 @@ OLLAMA_MODEL = _saved.get(
     os.environ.get("OLLAMA_MODEL", "qwen3.5:2b"),
 )
 
-# llama.cpp server settings (used when AI_PROVIDER == "llamacpp")
-LLAMACPP_BASE_URL = _saved.get(
-    "llamacpp_base_url",
-    os.environ.get("LLAMACPP_BASE_URL", "http://192.168.1.59:8080"),
+# Local OpenAI-compatible LLM (Qwen3.8-27B served by HyperQwen/vLLM).
+# Canonical variables are LLM_*; LLAMACPP_* are kept as backwards-compatible
+# aliases for older .env files and saved settings.
+LLM_BASE_URL = _first_setting(
+    (
+        ("llm_base_url", "LLM_BASE_URL"),
+        ("llamacpp_base_url", "LLAMACPP_BASE_URL"),
+    ),
+    "http://192.168.1.59:18020/v1",
 )
-LLAMACPP_MODEL = _saved.get(
-    "llamacpp_model",
-    os.environ.get("LLAMACPP_MODEL", "minicpm5-2b"),
+LLM_MODEL = _first_setting(
+    (
+        ("llm_model", "LLM_MODEL"),
+        ("llamacpp_model", "LLAMACPP_MODEL"),
+    ),
+    "qwen3.8-27b",
 )
-LLM_TEMPERATURE = 0.1
-LLM_MAX_TOKENS = 8192
-# MiniCPM5 has thinking enabled by default — disable it for deterministic
-# metadata extraction unless explicitly requested.
+# Mandatory for the new HyperQwen/vLLM endpoint. Never committed to git.
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "").strip()
+
+# Backwards-compatible aliases used by the settings API and older code.
+LLAMACPP_BASE_URL = LLM_BASE_URL
+LLAMACPP_MODEL = LLM_MODEL
+
+LLM_TEMPERATURE = float(os.environ.get("LLM_TEMPERATURE", "0.1"))
+# Qwen recommends keeping the generated output at or below 16k tokens.
+LLM_MAX_TOKENS = int(os.environ.get("LLM_MAX_TOKENS", "16384"))
+LLM_MAX_CONTEXT_TOKENS = int(os.environ.get("LLM_MAX_CONTEXT_TOKENS", "196608"))
+# Qwen3 thinking must be disabled for deterministic JSON. Any residual
+# <think>…</think> block is stripped by the LLM client before parsing.
 LLM_DISABLE_THINKING = _env_bool("LLM_DISABLE_THINKING", True)
+# Ask vLLM for JSON output (response_format=json_object) when supported.
+# The client automatically retries without it on HTTP 400.
+LLM_JSON_MODE = _env_bool("LLM_JSON_MODE", True)
+# Local 27B generation is slower than the former 2B model: allow long reads.
+LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "900"))
+LLM_CONNECT_TIMEOUT = float(os.environ.get("LLM_CONNECT_TIMEOUT", "15"))
+# Text-only profile: images are sent exclusively to the OCR backend, never
+# to the language model.
+LLM_TEXT_ONLY = _env_bool(
+    "LLM_LANGUAGE_MODEL_ONLY",
+    _env_bool("LLM_TEXT_ONLY", AI_PROVIDER in {"llamacpp", "ollama"}),
+)
 
 # Embedding settings
 EMBEDDING_MODEL_NAME = os.environ.get("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
@@ -126,10 +173,16 @@ OCR_PROMPT = os.environ.get("OCR_PROMPT", "plain").strip().lower()
 OCR_CACHE_DIR = os.path.join(DATA_DIR, "ocr_cache")
 OCR_CACHE_ENABLED = _env_bool("OCR_CACHE_ENABLED", True)
 
-# Long-document handling: split into blocks of pages for MiniCPM map-reduce.
-LLM_MAP_CHUNK_CHARS = int(os.environ.get("LLM_MAP_CHUNK_CHARS", "200000"))
-LLM_MAP_CHUNK_PAGES = int(os.environ.get("LLM_MAP_CHUNK_PAGES", "8"))
-# Enable MiniCPM-based segmentation of multi-document scans.
+# Long-document handling: split into blocks of pages for LLM map-reduce.
+# Qwen3.8-27B has a 196608-token context. With a 16384-token output budget,
+# ~600k characters (~150k tokens) leaves a comfortable safety margin.
+LLM_MAP_CHUNK_CHARS = int(os.environ.get("LLM_MAP_CHUNK_CHARS", "600000"))
+LLM_MAP_CHUNK_PAGES = int(os.environ.get("LLM_MAP_CHUNK_PAGES", "24"))
+# Page segmentation is cheap (a short snippet per page) and Qwen can handle
+# far more pages per call than the former 2B model.
+LLM_SEGMENT_MAX_PAGES = int(os.environ.get("LLM_SEGMENT_MAX_PAGES", "200"))
+LLM_SEGMENT_PAGE_CHARS = int(os.environ.get("LLM_SEGMENT_PAGE_CHARS", "2500"))
+# Enable LLM-based segmentation of multi-document scans.
 SEGMENT_MULTI_DOC = _env_bool("SEGMENT_MULTI_DOC", True)
 
 # SQLite tuning
